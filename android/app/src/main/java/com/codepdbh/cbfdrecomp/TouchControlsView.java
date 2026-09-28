@@ -57,7 +57,7 @@ public class TouchControlsView extends View {
     static native void nativeSetButton(int button, boolean pressed);
     static native void nativeSetAxis(int axis, int value);
     static native void nativeAddGyro(float x, float y);
-    /** { visible, opacity (0 to 1), haptics }, from the game's settings and menus. */
+    /** { visible, opacity (0 to 1), haptics, device lost }, from the game's settings, menus and renderer. */
     static native float[] nativeGetState();
 
     private static Vibrator vibrator;
@@ -148,6 +148,14 @@ public class TouchControlsView extends View {
     void setOnMenu(Runnable listener) {
         menuListener = listener;
     }
+
+    // When the renderer loses the GPU (GameActivity offers to start again).
+    private Runnable deviceLostListener;
+    private boolean deviceLostReported = false;
+
+    void setOnDeviceLost(Runnable listener) {
+        deviceLostListener = listener;
+    }
     private final RectF[] toolRects = { new RectF(), new RectF(), new RectF(), new RectF() };
 
     /**
@@ -165,6 +173,13 @@ public class TouchControlsView extends View {
                 state = nativeGetState();
             } catch (UnsatisfiedLinkError e) {
                 // The game's library isn't there.
+            }
+            if (state != null && state.length > 3 && state[3] > 0.5f && !deviceLostReported) {
+                deviceLostReported = true;
+                releaseAll();
+                if (deviceLostListener != null) {
+                    deviceLostListener.run();
+                }
             }
             if (state != null) {
                 boolean newHidden = state[0] < 0.5f;

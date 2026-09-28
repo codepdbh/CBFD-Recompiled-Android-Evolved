@@ -41,11 +41,11 @@ public class SettingsActivity extends Activity {
     private JSONObject general, graphics, sound;
     private float density;
 
-    // Graphics presets: resolution, antialiasing, frame rate.
+    // Graphics presets: resolution and antialiasing (the frame rate is chosen on its own).
     private enum Preset {
-        PERFORMANCE("Fluido","Resolución media y 30 fps, como la consola. Más fluido y gasta menos batería."),
-        BALANCED("Equilibrado", "Resolución completa a 60 fps. Recomendado."),
-        QUALITY("Calidad", "Resolución completa, bordes suaves y los fps de tu pantalla. Exigente.");
+        PERFORMANCE("Fluido", "Resolución media: más fluido, menos calor y batería."),
+        BALANCED("Equilibrado", "Resolución completa. Recomendado."),
+        QUALITY("Calidad", "Resolución completa con bordes suaves (antialiasing). Exigente.");
 
         final String label, description;
 
@@ -96,6 +96,7 @@ public class SettingsActivity extends Activity {
         JSONObject json = read("graphics.json");
         try {
             applyPreset(json, Preset.BALANCED);
+            applyFrameRate(json, 60);
             if (!json.has("ar_option")) {
                 json.put("ar_option", "Expand");
                 json.put("hr_option", "Clamp16x9");
@@ -117,30 +118,47 @@ public class SettingsActivity extends Activity {
             case PERFORMANCE:
                 json.put("res_option", "Original2x");
                 json.put("msaa_option", "None");
-                json.put("rr_option", "Original");
                 break;
             case BALANCED:
                 json.put("res_option", "Auto");
                 json.put("msaa_option", "None");
-                json.put("rr_option", "Manual");
-                json.put("rr_manual_value", 60);
                 break;
             case QUALITY:
                 json.put("res_option", "Auto");
                 json.put("msaa_option", "MSAA2X");
-                json.put("rr_option", "Display");
                 break;
+        }
+        if (!json.has("rr_option")) {
+            applyFrameRate(json, 60);
+        }
+    }
+
+    /** 30 is the game's own rate; others are RT64's manual rate, whatever the screen runs at. */
+    private static void applyFrameRate(JSONObject json, int fps) throws Exception {
+        if (fps <= 30) {
+            json.put("rr_option", "Original");
+        } else {
+            json.put("rr_option", "Manual");
+            json.put("rr_manual_value", fps);
+        }
+    }
+
+    /** The frame rate set (the Display option counts as the screen's maximum). */
+    static int currentFrameRate(JSONObject json, int displayMax) {
+        switch (json.optString("rr_option", "Manual")) {
+            case "Original": return 30;
+            case "Display": return displayMax;
+            default: return json.optInt("rr_manual_value", 60);
         }
     }
 
     private Preset currentPreset() {
         String res = graphics.optString("res_option", "Auto");
         String msaa = graphics.optString("msaa_option", "None");
-        String rr = graphics.optString("rr_option", "Manual");
-        if (res.equals("Original2x") || rr.equals("Original")) {
+        if (res.equals("Original2x") || res.equals("Original")) {
             return Preset.PERFORMANCE;
         }
-        if (!msaa.equals("None") || rr.equals("Display")) {
+        if (!msaa.equals("None")) {
             return Preset.QUALITY;
         }
         return Preset.BALANCED;
@@ -205,6 +223,7 @@ public class SettingsActivity extends Activity {
         highlight(presetButtons, currentPreset().ordinal());
         card.addView(presets);
         card.addView(presetDescription);
+        card.addView(frameRateRow());
         card.addView(toggle("Pantalla ancha", "Usa todo el ancho del teléfono en vez del 4:3 original.",
             !graphics.optString("ar_option", "Expand").equals("Original"),
             on -> put(graphics, "ar_option", on ? "Expand" : "Original")));
@@ -252,6 +271,60 @@ public class SettingsActivity extends Activity {
             on -> put(general, "look_stick_invert", on ? "InvertY" : "None")));
 
         return page;
+    }
+
+    // The frame rate: 30, 60 and the screen's faster rates, up to its maximum.
+    private View frameRateRow() {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(0, dp(12), 0, dp(4));
+        int max = FrameRates.displayMax(this);
+        box.addView(text("Cuadros por segundo", 16, Color.WHITE, false));
+        TextView description = text("", 13, 0xFFB8A898, false);
+        java.util.List<Integer> rates = FrameRates.choices(this);
+        LinearLayout row = new LinearLayout(this);
+        Button[] buttons = new Button[rates.size()];
+        int current = currentFrameRate(graphics, max);
+        int selected = 0;
+        for (int i = 0; i < rates.size(); i++) {
+            final int fps = rates.get(i);
+            final int index = i;
+            Button button = new Button(this);
+            button.setText(fps == max && fps > 60 ? fps + " (máx)" : String.valueOf(fps));
+            button.setAllCaps(false);
+            button.setTextColor(Color.WHITE);
+            button.setOnClickListener(v -> {
+                try {
+                    applyFrameRate(graphics, fps);
+                } catch (Exception e) {
+                    Log.w(TAG, "fps", e);
+                }
+                description.setText(frameRateDescription(fps));
+                highlight(buttons, index);
+            });
+            buttons[i] = button;
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(44), 1);
+            params.setMargins(dp(3), dp(6), dp(3), dp(4));
+            row.addView(button, params);
+            if (Math.abs(fps - current) < Math.abs(rates.get(selected) - current)) {
+                selected = i;
+            }
+        }
+        highlight(buttons, selected);
+        description.setText(frameRateDescription(rates.get(selected)));
+        box.addView(row);
+        box.addView(description);
+        return box;
+    }
+
+    static String frameRateDescription(int fps) {
+        if (fps <= 30) {
+            return "Como en la consola. Lo más ligero.";
+        }
+        if (fps <= 60) {
+            return "Movimiento suave. Recomendado.";
+        }
+        return "Lo más suave que tu pantalla puede mostrar. Exigente: calienta más y gasta más batería.";
     }
 
     private void highlight(Button[] buttons, int selected) {
@@ -363,7 +436,7 @@ public class SettingsActivity extends Activity {
         }
     }
 
-    private static JSONObject read(String name) {
+    static JSONObject read(String name) {
         File file = new File(MainActivity.gameFolder(), name);
         if (file.isFile()) {
             try (InputStream in = new FileInputStream(file)) {

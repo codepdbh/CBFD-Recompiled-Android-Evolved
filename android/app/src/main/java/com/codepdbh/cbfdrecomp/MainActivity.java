@@ -52,6 +52,8 @@ public class MainActivity extends Activity {
     private static final int PICK_ROM = 1, PICK_MODS = 2;
     // GameActivity asks for a save copy (SaveSlots) to be restored and the game started again.
     static final String EXTRA_RESTORE_SLOT = "restore_slot";
+    // For EXTRA_RESTORE_SLOT: start the game again without restoring a copy.
+    static final int RESTART_ONLY = -1;
     // The ROM the game keeps once it has checked it (librecomp's stored_filename()).
     private static final String STORED_ROM = "conker.n64.us.1.0.z64";
 
@@ -84,13 +86,13 @@ public class MainActivity extends Activity {
     /** Once the game's process has ended (it would write its own save), the copy, and play. */
     private void restoreIfAsked(Intent intent) {
         int slot = intent != null ? intent.getIntExtra(EXTRA_RESTORE_SLOT, 0) : 0;
-        if (slot <= 0) {
+        if (slot == 0) {
             return;
         }
         intent.removeExtra(EXTRA_RESTORE_SLOT);
         busy = true;
         setButtonsEnabled(false);
-        romStatus.setText("Cargando la copia " + slot + "…");
+        romStatus.setText(slot > 0 ? "Cargando la copia " + slot + "…" : "Reiniciando el juego…");
         new Thread(() -> {
             android.app.ActivityManager manager = (android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE);
             String gameProcess = getPackageName() + ":game";
@@ -112,10 +114,12 @@ public class MainActivity extends Activity {
                 }
             }
             String error = null;
-            try {
-                SaveSlots.restore(slot);
-            } catch (IOException e) {
-                error = "No se pudo cargar la copia: " + e.getMessage();
+            if (slot > 0) {
+                try {
+                    SaveSlots.restore(slot);
+                } catch (IOException e) {
+                    error = "No se pudo cargar la copia: " + e.getMessage();
+                }
             }
             String message = error;
             runOnUiThread(() -> {

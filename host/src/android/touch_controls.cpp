@@ -19,6 +19,10 @@
 #include "recompui/config.h"
 #include "recompui/recompui.h"
 
+namespace plume {
+    bool isAndroidDeviceLost(); // plume.patch
+}
+
 namespace {
     SDL_Joystick* touch_joystick = nullptr;
 
@@ -245,7 +249,8 @@ Java_com_codepdbh_cbfdrecomp_TouchControlsView_nativeAddGyro(JNIEnv*, jclass, jf
     gyro_y += y;
 }
 
-// What the overlay shows, polled a few times a second: { visible, opacity (0 to 1), haptics }.
+// What the overlay shows, polled a few times a second: { visible, opacity (0 to 1), haptics,
+// device lost (the renderer can't go on: the game has to start again) }.
 // Hidden while a menu has the input (the launcher, settings...), which takes touches as clicks.
 extern "C" JNIEXPORT jfloatArray JNICALL
 Java_com_codepdbh_cbfdrecomp_TouchControlsView_nativeGetState(JNIEnv* env, jclass cls) {
@@ -279,8 +284,8 @@ Java_com_codepdbh_cbfdrecomp_TouchControlsView_nativeGetState(JNIEnv* env, jclas
     } catch (...) {
         // The settings aren't there yet.
     }
-    float state[3] = { visible, opacity, haptics };
-    jfloatArray result = env->NewFloatArray(3);
-    env->SetFloatArrayRegion(result, 0, 3, state);
+    float state[4] = { visible, opacity, haptics, plume::isAndroidDeviceLost() ? 1.0f : 0.0f };
+    jfloatArray result = env->NewFloatArray(4);
+    env->SetFloatArrayRegion(result, 0, 4, state);
     return result;
 }

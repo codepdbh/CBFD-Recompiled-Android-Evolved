@@ -1,8 +1,8 @@
 diff --git a/plume_vulkan.cpp b/plume_vulkan.cpp
-index f1dd503..9763cc0 100644
+index f1dd503..65e871d 100644
 --- a/plume_vulkan.cpp
 +++ b/plume_vulkan.cpp
-@@ -2073,6 +2073,14 @@ namespace plume {
+@@ -2073,6 +2073,35 @@ namespace plume {
  
      // VulkanSwapChain
  
@@ -12,12 +12,33 @@ index f1dd503..9763cc0 100644
 +    void setAndroidWindowProvider(ANativeWindow *(*provider)()) {
 +        androidWindowProvider = provider;
 +    }
++
++    // Mobile drivers can lose the device (a GPU fault or a job that took too long), and nothing
++    // after that works: every submission fails at once. The program learns of it here to start
++    // over, and the errors are reported once rather than thousands of times a second.
++    static std::atomic<bool> androidDeviceLost = false;
++
++    bool isAndroidDeviceLost() {
++        return androidDeviceLost;
++    }
++
++    static bool reportDeviceLost(VkResult res, const char *where) {
++        if (res != VK_ERROR_DEVICE_LOST) {
++            return false;
++        }
++        if (!androidDeviceLost.exchange(true)) {
++            char thread[32] = {};
++            pthread_getname_np(pthread_self(), thread, sizeof(thread));
++            fprintf(stderr, "The Vulkan device was lost (%s, thread %s).\n", where, thread);
++        }
++        return true;
++    }
 +#endif
 +
      VulkanSwapChain::VulkanSwapChain(VulkanCommandQueue *commandQueue, const RenderSwapChainDesc &desc) {
          assert(commandQueue != nullptr);
          assert(desc.textureCount > 0);
-@@ -2114,6 +2122,10 @@ namespace plume {
+@@ -2114,6 +2143,10 @@ namespace plume {
              fprintf(stderr, "vkCreateAndroidSurfaceKHR failed with error code 0x%X.\n", res);
              return;
          }
@@ -28,7 +49,7 @@ index f1dd503..9763cc0 100644
  #   elif defined(__linux__)
          assert(desc.renderWindow.display != 0);
          assert(desc.renderWindow.window != 0);
-@@ -2247,6 +2259,9 @@ namespace plume {
+@@ -2247,6 +2280,9 @@ namespace plume {
          if (surface != VK_NULL_HANDLE) {
              VulkanInterface *renderInterface = commandQueue->device->renderInterface;
              vkDestroySurfaceKHR(renderInterface->instance, surface, nullptr);
@@ -38,7 +59,7 @@ index f1dd503..9763cc0 100644
          }
  
          // Remove tracking from the parent command queue.
-@@ -2310,6 +2325,12 @@ namespace plume {
+@@ -2310,6 +2346,12 @@ namespace plume {
      }
  
      bool VulkanSwapChain::resize() {
@@ -51,7 +72,7 @@ index f1dd503..9763cc0 100644
          getWindowSize(width, height);
  
          // Don't recreate the swap chain at all if the window doesn't have a valid size.
-@@ -2401,6 +2422,11 @@ namespace plume {
+@@ -2401,6 +2443,11 @@ namespace plume {
      }
  
      bool VulkanSwapChain::needsResize() const {
@@ -63,7 +84,7 @@ index f1dd503..9763cc0 100644
          uint32_t windowWidth, windowHeight;
          getWindowSize(windowWidth, windowHeight);
          return (vk == VK_NULL_HANDLE) || (windowWidth != width) || (windowHeight != height) || (requiredPresentMode != createdPresentMode);
-@@ -2501,6 +2527,56 @@ namespace plume {
+@@ -2501,6 +2548,56 @@ namespace plume {
          }
      }
  
@@ -120,11 +141,40 @@ index f1dd503..9763cc0 100644
      void VulkanSwapChain::releaseImageViews() {
          for (VulkanTexture &texture : textures) {
              if (texture.imageView != VK_NULL_HANDLE) {
+@@ -3626,17 +3723,27 @@ namespace plume {
+         }
+ 
+         if (res != VK_SUCCESS) {
++#       if defined(__ANDROID__)
++            if (reportDeviceLost(res, "vkQueueSubmit")) {
++                return;
++            }
++#       endif
+             fprintf(stderr, "vkQueueSubmit failed with error code 0x%X.\n", res);
+             return;
+         }
+     }
+-    
++
+     void VulkanCommandQueue::waitForCommandFence(RenderCommandFence *fence) {
+         assert(fence != nullptr);
+ 
+         VulkanCommandFence *interfaceFence = static_cast<VulkanCommandFence *>(fence);
+         VkResult res = vkWaitForFences(device->vk, 1, &interfaceFence->vk, VK_TRUE, UINT64_MAX);
+         if (res != VK_SUCCESS) {
++#       if defined(__ANDROID__)
++            if (reportDeviceLost(res, "vkWaitForFences")) {
++                return;
++            }
++#       endif
+             fprintf(stderr, "vkWaitForFences failed with error code 0x%X.\n", res);
+             return;
+         }
 diff --git a/plume_vulkan.h b/plume_vulkan.h
-index 0a1edbe..d228431 100644
+index 0a1edbe..685495e 100644
 --- a/plume_vulkan.h
 +++ b/plume_vulkan.h
-@@ -261,8 +261,18 @@ namespace plume {
+@@ -261,8 +261,21 @@ namespace plume {
          void getWindowSize(uint32_t &dstWidth, uint32_t &dstHeight) const;
          void releaseSwapChain();
          void releaseImageViews();
@@ -138,6 +188,9 @@ index 0a1edbe..d228431 100644
 +    // away meanwhile): swap chains ask this for the one to show now, and move their surface
 +    // to it. It returns null while there's none.
 +    void setAndroidWindowProvider(ANativeWindow *(*provider)());
++
++    // Whether the Vulkan device was lost (see plume_vulkan.cpp).
++    bool isAndroidDeviceLost();
 +#endif
 +
      struct VulkanFramebuffer : RenderFramebuffer {

@@ -105,6 +105,7 @@ final class PauseMenu {
         heading.setPadding(0, 0, 0, dp(6));
         settings.addView(heading);
         settings.addView(qualityButtons());
+        settings.addView(frameRateButtons());
         settings.addView(slider("Volumen", "sound", "main_volume", 0, 100));
         settings.addView(slider("Transparencia de los botones", "general", "android_touch_opacity", 10, 100));
         settings.addView(toggle("Apuntar moviendo el teléfono (con R)", "general", "android_phone_gyro"));
@@ -128,9 +129,9 @@ final class PauseMenu {
         LinearLayout row = new LinearLayout(activity);
         String[] labels = { "Fluido", "Equilibrado", "Calidad" };
         String[] descriptions = {
-            "Resolución media a 30 fps: más fluido y menos batería.",
-            "Resolución completa a 60 fps. Recomendado.",
-            "Bordes suaves y los fps de tu pantalla. Exigente.",
+            "Resolución media: más fluido, menos calor y batería.",
+            "Resolución completa. Recomendado.",
+            "Resolución completa con bordes suaves (antialiasing). Exigente.",
         };
         Button[] buttons = new Button[3];
         int current = currentQuality();
@@ -160,11 +161,10 @@ final class PauseMenu {
     private int currentQuality() {
         double res = nativeGetOption("graphics", "res_option");
         double msaa = nativeGetOption("graphics", "msaa_option");
-        double rr = nativeGetOption("graphics", "rr_option");
-        if (res == 1 || rr == 0) {
+        if (res == 0 || res == 1) {
             return 0;
         }
-        if (msaa > 0 || rr == 1) {
+        if (msaa > 0) {
             return 2;
         }
         return 1;
@@ -175,20 +175,63 @@ final class PauseMenu {
             case 0:
                 nativeSetOption("graphics", "res_option", ENUM, 1);  // Original2x
                 nativeSetOption("graphics", "msaa_option", ENUM, 0); // None
-                nativeSetOption("graphics", "rr_option", ENUM, 0);   // Original
                 break;
             case 1:
                 nativeSetOption("graphics", "res_option", ENUM, 2);  // Auto
                 nativeSetOption("graphics", "msaa_option", ENUM, 0);
-                nativeSetOption("graphics", "rr_option", ENUM, 2);   // Manual
-                nativeSetOption("graphics", "rr_manual_value", NUMBER, 60);
                 break;
             case 2:
                 nativeSetOption("graphics", "res_option", ENUM, 2);
                 nativeSetOption("graphics", "msaa_option", ENUM, 1); // MSAA2X
-                nativeSetOption("graphics", "rr_option", ENUM, 1);   // Display
                 break;
         }
+    }
+
+    // The frame rate: 30 (Original), or RT64's manual rate, independent of the screen's.
+    private View frameRateButtons() {
+        LinearLayout box = new LinearLayout(activity);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(0, dp(6), 0, dp(6));
+        box.addView(text("Cuadros por segundo", 16, Color.WHITE, false));
+        TextView description = text("", 13, MUTED, false);
+        int max = FrameRates.displayMax(activity);
+        java.util.List<Integer> rates = FrameRates.choices(activity);
+        double rr = nativeGetOption("graphics", "rr_option");
+        int current = rr == 0 ? 30 : rr == 1 ? max : (int) Math.round(nativeGetOption("graphics", "rr_manual_value"));
+        LinearLayout row = new LinearLayout(activity);
+        Button[] buttons = new Button[rates.size()];
+        int selected = 0;
+        for (int i = 0; i < rates.size(); i++) {
+            final int fps = rates.get(i);
+            final int index = i;
+            Button button = new Button(activity);
+            button.setText(fps == max && fps > 60 ? fps + " (máx)" : String.valueOf(fps));
+            button.setAllCaps(false);
+            button.setTextColor(Color.WHITE);
+            button.setOnClickListener(v -> {
+                if (fps <= 30) {
+                    nativeSetOption("graphics", "rr_option", ENUM, 0);       // Original
+                } else {
+                    nativeSetOption("graphics", "rr_manual_value", NUMBER, fps);
+                    nativeSetOption("graphics", "rr_option", ENUM, 2);       // Manual
+                }
+                FrameRates.requestFor(activity, fps);
+                description.setText(SettingsActivity.frameRateDescription(fps));
+                highlight(buttons, index);
+            });
+            buttons[i] = button;
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(44), 1);
+            params.setMargins(dp(3), dp(6), dp(3), dp(4));
+            row.addView(button, params);
+            if (Math.abs(fps - current) < Math.abs(rates.get(selected) - current)) {
+                selected = i;
+            }
+        }
+        highlight(buttons, selected);
+        description.setText(SettingsActivity.frameRateDescription(rates.get(selected)));
+        box.addView(row);
+        box.addView(description);
+        return box;
     }
 
     private void highlight(Button[] buttons, int selected) {

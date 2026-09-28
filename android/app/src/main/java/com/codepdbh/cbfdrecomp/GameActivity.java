@@ -39,10 +39,14 @@ public class GameActivity extends SDLActivity {
             touchControls = new TouchControlsView(this);
             touchControls.setOnSaveCopies(this::showSaveCopies);
             touchControls.setOnMenu(() -> new PauseMenu(this, touchControls).show());
+            touchControls.setOnDeviceLost(this::onDeviceLost);
             addContentView(touchControls, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         }
         hideSystemBars();
+        // The screen at least as fast as the game's frame rate.
+        FrameRates.requestFor(this, SettingsActivity.currentFrameRate(
+            SettingsActivity.read("graphics.json"), FrameRates.displayMax(this)));
     }
 
     // Save copies (SaveSlots): the overlay's save button.
@@ -121,13 +125,36 @@ public class GameActivity extends SDLActivity {
         dialog.show();
     }
 
-    /** Ends the game, and the start screen restores the copy and starts it again. */
+    /**
+     * The renderer lost the GPU (the driver reset it: a fault, or a job that took too long, more
+     * likely with the screen being recorded). Nothing more can be drawn, so the game starts again
+     * from its last save.
+     */
+    private void onDeviceLost() {
+        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Error de la GPU")
+            .setMessage("La GPU del teléfono se reinició y el juego no puede seguir dibujando. "
+                + "Se volverá a abrir desde tu último guardado.\n\n"
+                + "Si pasa seguido, prueba la calidad gráfica \"Fluido\".")
+            .setCancelable(false)
+            .setPositiveButton("Reiniciar el juego", (d, w) -> restartWith(MainActivity.RESTART_ONLY))
+            .setNegativeButton("Salir al inicio", (d, w) -> restartWith(0))
+            .show();
+    }
+
+    /**
+     * Ends the game, and the start screen restores the copy (if any, or plays again with
+     * RESTART_ONLY). The game's process just ends: waiting for the game to wind down hangs once
+     * the renderer has lost the GPU. Its save is already written (librecomp writes it at once).
+     */
     private void restartWith(int slot) {
         Intent intent = new Intent(this, MainActivity.class);
-        intent.putExtra(MainActivity.EXTRA_RESTORE_SLOT, slot);
+        if (slot != 0) {
+            intent.putExtra(MainActivity.EXTRA_RESTORE_SLOT, slot);
+        }
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         startActivity(intent);
-        finish();
+        android.os.Process.killProcess(android.os.Process.myPid());
     }
 
     // The phone's gyro only while the game shows.
