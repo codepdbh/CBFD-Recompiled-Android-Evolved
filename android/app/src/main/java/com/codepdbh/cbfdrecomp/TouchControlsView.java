@@ -132,7 +132,22 @@ public class TouchControlsView extends View {
     private int dragPointer = -1;
     private float dragOffsetX, dragOffsetY;
     private final RectF editButton = new RectF();
-    private final String[] toolLabels = { "−", "+", "Reset", "Done" };
+    private final String[] toolLabels = { "−", "+", "Restablecer", "Listo" };
+
+    // The save copies' button (GameActivity shows them).
+    private final RectF saveButton = new RectF();
+    private Runnable saveListener;
+
+    void setOnSaveCopies(Runnable listener) {
+        saveListener = listener;
+    }
+
+    // The menu button's pause menu (GameActivity shows it).
+    private Runnable menuListener;
+
+    void setOnMenu(Runnable listener) {
+        menuListener = listener;
+    }
     private final RectF[] toolRects = { new RectF(), new RectF(), new RectF(), new RectF() };
 
     /**
@@ -284,6 +299,7 @@ public class TouchControlsView extends View {
         }
         float size = 34 * density;
         editButton.set(w / 2f - size / 2, 8 * density, w / 2f + size / 2, 8 * density + size);
+        saveButton.set(editButton.left - size - 12 * density, editButton.top, editButton.left - 12 * density, editButton.bottom);
         float toolWidth = 72 * density, toolHeight = 40 * density, gap = 10 * density;
         float left = w / 2f - (toolRects.length * toolWidth + (toolRects.length - 1) * gap) / 2;
         float top = h * 0.22f;
@@ -340,19 +356,26 @@ public class TouchControlsView extends View {
     }
 
     private void drawEditButton(Canvas canvas) {
-        fill.setColor(editing ? 0xC0F08A24 : 0x559A9A9A);
         stroke.setColor(0x90FFFFFF);
+        fill.setColor(editing ? 0xC0F08A24 : 0x559A9A9A);
         canvas.drawRoundRect(editButton, 10 * density, 10 * density, fill);
         canvas.drawRoundRect(editButton, 10 * density, 10 * density, stroke);
         text.setTextSize(editButton.height() * 0.55f);
         drawCentered(canvas, "✎", editButton.centerX(), editButton.centerY());
+        if (!editing) {
+            fill.setColor(0x559A9A9A);
+            canvas.drawRoundRect(saveButton, 10 * density, 10 * density, fill);
+            canvas.drawRoundRect(saveButton, 10 * density, 10 * density, stroke);
+            text.setTextSize(saveButton.height() * 0.5f);
+            drawCentered(canvas, "💾", saveButton.centerX(), saveButton.centerY());
+        }
     }
 
     private void drawToolbar(Canvas canvas) {
         text.setTextSize(15 * density);
         String hint = selected == null
-            ? "Drag a control to move it. Tap one to resize it."
-            : "Size: " + Math.round(selected.scale * 100) + "%";
+            ? "Arrastra un botón para moverlo. Tócalo para cambiar su tamaño."
+            : "Tamaño: " + Math.round(selected.scale * 100) + "%";
         drawCentered(canvas, hint, getWidth() / 2f, toolRects[0].top - 16 * density);
         for (int i = 0; i < toolRects.length; i++) {
             boolean enabled = i >= 2 || selected != null;
@@ -378,6 +401,14 @@ public class TouchControlsView extends View {
         }
         int action = event.getActionMasked();
         int index = event.getActionIndex();
+        if (action == MotionEvent.ACTION_DOWN && !editing && saveButton.contains(event.getX(), event.getY())) {
+            releaseAll();
+            if (saveListener != null) {
+                saveListener.run();
+            }
+            performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+            return true;
+        }
         if (action == MotionEvent.ACTION_DOWN && editButton.contains(event.getX(), event.getY())) {
             if (editing) {
                 finishEditing();
@@ -400,6 +431,15 @@ public class TouchControlsView extends View {
                 if (c == null) {
                     // Nothing here: the first touch goes to the game's window instead.
                     return action != MotionEvent.ACTION_DOWN;
+                }
+                // The menu button opens the pause menu rather than the game's desktop menu.
+                if (c.kind == Kind.BUTTON && c.id == BUTTON_BACK && menuListener != null) {
+                    releaseAll();
+                    menuListener.run();
+                    if (haptics) {
+                        performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+                    }
+                    return true;
                 }
                 pointers.put(event.getPointerId(index), c);
                 press(c, true);
@@ -499,10 +539,16 @@ public class TouchControlsView extends View {
         }
     }
 
-    private void startEditing() {
+    void startEditing() {
         releaseAll();
         editing = true;
         selected = null;
+    }
+
+    /** The game's desktop menu (controller and keyboard remapping): a press of Back. */
+    void pressMenuButton() {
+        nativeSetButton(BUTTON_BACK, true);
+        postDelayed(() -> nativeSetButton(BUTTON_BACK, false), 120);
     }
 
     private void finishEditing() {

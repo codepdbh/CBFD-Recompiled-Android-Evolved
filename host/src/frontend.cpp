@@ -51,6 +51,7 @@ SDL_Window* window = nullptr;
 void conker_mouse_camera_init();
 #if defined(__ANDROID__)
 void conker_android_attach_touch_controller(); // android/touch_controls.cpp
+void conker_android_apply_pending_options();
 #endif
 
 namespace {
@@ -156,6 +157,10 @@ namespace {
 
     void update_gfx(void*) {
         recompinput::handle_events();
+#if defined(__ANDROID__)
+        // Settings changed in the pause menu (android/touch_controls.cpp).
+        conker_android_apply_pending_options();
+#endif
         std::string title;
         {
             std::lock_guard lock(title_mutex);

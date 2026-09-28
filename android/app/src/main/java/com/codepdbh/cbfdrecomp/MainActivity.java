@@ -50,6 +50,8 @@ import java.util.zip.ZipFile;
 public class MainActivity extends Activity {
     private static final String TAG = "ConkerRecomp";
     private static final int PICK_ROM = 1, PICK_MODS = 2;
+    // GameActivity asks for a save copy (SaveSlots) to be restored and the game started again.
+    static final String EXTRA_RESTORE_SLOT = "restore_slot";
     // The ROM the game keeps once it has checked it (librecomp's stored_filename()).
     private static final String STORED_ROM = "conker.n64.us.1.0.z64";
 
@@ -70,6 +72,62 @@ public class MainActivity extends Activity {
         modsButton.setOnClickListener(v -> showMods());
         findViewById(R.id.settings).setOnClickListener(v ->
             startActivity(new Intent(this, SettingsActivity.class)));
+        restoreIfAsked(getIntent());
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        restoreIfAsked(intent);
+    }
+
+    /** Once the game's process has ended (it would write its own save), the copy, and play. */
+    private void restoreIfAsked(Intent intent) {
+        int slot = intent != null ? intent.getIntExtra(EXTRA_RESTORE_SLOT, 0) : 0;
+        if (slot <= 0) {
+            return;
+        }
+        intent.removeExtra(EXTRA_RESTORE_SLOT);
+        busy = true;
+        setButtonsEnabled(false);
+        romStatus.setText("Cargando la copia " + slot + "…");
+        new Thread(() -> {
+            android.app.ActivityManager manager = (android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE);
+            String gameProcess = getPackageName() + ":game";
+            for (int i = 0; i < 50; i++) {
+                boolean running = false;
+                List<android.app.ActivityManager.RunningAppProcessInfo> processes = manager.getRunningAppProcesses();
+                if (processes != null) {
+                    for (android.app.ActivityManager.RunningAppProcessInfo process : processes) {
+                        running |= gameProcess.equals(process.processName);
+                    }
+                }
+                if (!running) {
+                    break;
+                }
+                try {
+                    Thread.sleep(100);
+                } catch (InterruptedException e) {
+                    break;
+                }
+            }
+            String error = null;
+            try {
+                SaveSlots.restore(slot);
+            } catch (IOException e) {
+                error = "No se pudo cargar la copia: " + e.getMessage();
+            }
+            String message = error;
+            runOnUiThread(() -> {
+                busy = false;
+                updateRomStatus();
+                if (message != null) {
+                    Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+                } else {
+                    startGame();
+                }
+            });
+        }).start();
     }
 
     @Override

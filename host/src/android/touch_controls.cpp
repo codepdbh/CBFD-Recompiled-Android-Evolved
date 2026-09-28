@@ -10,6 +10,8 @@
 #include <cmath>
 #include <cstdio>
 #include <mutex>
+#include <string>
+#include <vector>
 
 #include <SDL.h>
 #include <jni.h>
@@ -111,6 +113,89 @@ bool conker_android_take_gyro(float* x, float* y) {
     } catch (...) {
         return false;
     }
+}
+
+// The pause menu's settings (PauseMenu.java). recompui's settings belong to the main thread, so
+// the changes wait for it (conker_android_apply_pending_options, from frontend.cpp).
+namespace {
+    struct PendingOption {
+        std::string config, option;
+        int kind; // 0: enum (its index), 1: number, 2: bool
+        double value;
+    };
+    std::mutex pending_mutex;
+    std::vector<PendingOption> pending_options;
+
+    std::string jstring_text(JNIEnv* env, jstring text) {
+        const char* chars = env->GetStringUTFChars(text, nullptr);
+        std::string result = chars;
+        env->ReleaseStringUTFChars(text, chars);
+        return result;
+    }
+}
+
+void conker_android_apply_pending_options() {
+    std::vector<PendingOption> options;
+    {
+        std::lock_guard lock{pending_mutex};
+        options.swap(pending_options);
+    }
+    if (options.empty()) {
+        return;
+    }
+    std::vector<std::string> changed_configs;
+    for (const PendingOption& p : options) {
+        try {
+            recomp::config::Config& config = recompui::config::get_config(p.config);
+            recomp::config::ConfigValueVariant value;
+            switch (p.kind) {
+                case 0: value = (uint32_t)p.value; break;
+                case 1: value = p.value; break;
+                default: value = p.value != 0.0; break;
+            }
+            config.set_option_value(p.option, value);
+            config.apply_option_value(p.option);
+            if (std::find(changed_configs.begin(), changed_configs.end(), p.config) == changed_configs.end()) {
+                changed_configs.push_back(p.config);
+            }
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "[android] couldn't set %s.%s: %s\n", p.config.c_str(), p.option.c_str(), e.what());
+        }
+    }
+    // Saving also applies them (graphics: the renderer takes its new configuration).
+    for (const std::string& id : changed_configs) {
+        try {
+            recompui::config::get_config(id).save_config();
+        } catch (const std::exception& e) {
+            std::fprintf(stderr, "[android] couldn't save %s: %s\n", id.c_str(), e.what());
+        }
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_codepdbh_cbfdrecomp_PauseMenu_nativeSetOption(JNIEnv* env, jclass, jstring config, jstring option, jint kind, jdouble value) {
+    std::lock_guard lock{pending_mutex};
+    pending_options.push_back({jstring_text(env, config), jstring_text(env, option), kind, value});
+}
+
+// An option's value: an enum's index, a number, or a bool as 0 or 1 (-1 if there's none).
+extern "C" JNIEXPORT jdouble JNICALL
+Java_com_codepdbh_cbfdrecomp_PauseMenu_nativeGetOption(JNIEnv* env, jclass, jstring config, jstring option) {
+    try {
+        recomp::config::ConfigValueVariant value =
+            recompui::config::get_config(jstring_text(env, config)).get_option_value(jstring_text(env, option));
+        if (auto* index = std::get_if<uint32_t>(&value)) {
+            return *index;
+        }
+        if (auto* number = std::get_if<double>(&value)) {
+            return *number;
+        }
+        if (auto* flag = std::get_if<bool>(&value)) {
+            return *flag ? 1.0 : 0.0;
+        }
+    } catch (...) {
+    }
+    return -1.0;
 }
 
 // frontend.cpp, once SDL's joystick subsystem is up.

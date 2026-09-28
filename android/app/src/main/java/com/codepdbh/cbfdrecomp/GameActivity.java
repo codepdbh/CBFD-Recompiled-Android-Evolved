@@ -1,7 +1,17 @@
 package com.codepdbh.cbfdrecomp;
 
+import android.app.AlertDialog;
+import android.content.Intent;
+import android.graphics.Color;
 import android.os.Bundle;
+import android.view.Gravity;
 import android.view.ViewGroup;
+import android.widget.Button;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import java.io.IOException;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
 import android.view.WindowManager;
@@ -27,10 +37,97 @@ public class GameActivity extends SDLActivity {
             WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
         if (mLayout != null) {
             touchControls = new TouchControlsView(this);
+            touchControls.setOnSaveCopies(this::showSaveCopies);
+            touchControls.setOnMenu(() -> new PauseMenu(this, touchControls).show());
             addContentView(touchControls, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         }
         hideSystemBars();
+    }
+
+    // Save copies (SaveSlots): the overlay's save button.
+
+    void showSaveCopies() {
+        float density = getResources().getDisplayMetrics().density;
+        int pad = Math.round(16 * density);
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        list.setPadding(pad, pad / 2, pad, 0);
+
+        TextView about = new TextView(this);
+        about.setText("Guarda una copia de tu partida (lo último que el juego guardó en un checkpoint) "
+            + "y vuelve a ella cuando quieras. Al cargar, el juego se reinicia en esa copia.");
+        about.setTextColor(Color.LTGRAY);
+        about.setTextSize(13);
+        list.addView(about);
+
+        AlertDialog dialog = new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Copias de partida")
+            .setView(list)
+            .setNegativeButton("Cerrar", null)
+            .create();
+
+        for (int slot = 1; slot <= SaveSlots.COUNT; slot++) {
+            final int n = slot;
+            LinearLayout row = new LinearLayout(this);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(0, pad, 0, 0);
+            TextView label = new TextView(this);
+            String when = SaveSlots.describe(n);
+            label.setText("Espacio " + n + "\n" + (when != null ? when : "Vacío"));
+            label.setTextColor(Color.WHITE);
+            label.setTextSize(15);
+            row.addView(label, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+
+            Button save = new Button(this);
+            save.setText("Guardar");
+            save.setAllCaps(false);
+            save.setEnabled(SaveSlots.hasSave());
+            save.setOnClickListener(v -> {
+                try {
+                    SaveSlots.save(n);
+                    Toast.makeText(this, "Copia guardada en el espacio " + n, Toast.LENGTH_SHORT).show();
+                } catch (IOException e) {
+                    Toast.makeText(this, "No se pudo guardar la copia: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                }
+                dialog.dismiss();
+            });
+            row.addView(save);
+
+            Button load = new Button(this);
+            load.setText("Cargar");
+            load.setAllCaps(false);
+            load.setEnabled(SaveSlots.hasSlot(n));
+            load.setOnClickListener(v -> {
+                dialog.dismiss();
+                new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                    .setTitle("¿Cargar el espacio " + n + "?")
+                    .setMessage("El juego se reiniciará en esa copia. Lo que hayas avanzado desde tu último guardado se perderá.")
+                    .setNegativeButton("Cancelar", null)
+                    .setPositiveButton("Cargar", (d, w) -> restartWith(n))
+                    .show();
+            });
+            row.addView(load);
+            list.addView(row);
+        }
+        if (!SaveSlots.hasSave()) {
+            TextView none = new TextView(this);
+            none.setText("Todavía no hay partida guardada: el juego guarda al llegar a un checkpoint.");
+            none.setTextColor(0xFFF08A24);
+            none.setTextSize(13);
+            none.setPadding(0, pad, 0, 0);
+            list.addView(none);
+        }
+        dialog.show();
+    }
+
+    /** Ends the game, and the start screen restores the copy and starts it again. */
+    private void restartWith(int slot) {
+        Intent intent = new Intent(this, MainActivity.class);
+        intent.putExtra(MainActivity.EXTRA_RESTORE_SLOT, slot);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        startActivity(intent);
+        finish();
     }
 
     // The phone's gyro only while the game shows.
