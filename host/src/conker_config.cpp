@@ -8,6 +8,10 @@
 
 #include "conker.hpp"
 
+#if defined(__ANDROID__)
+void conker_android_add_options(recomp::config::Config& config); // android/touch_controls.cpp
+#endif
+
 namespace {
     void set_control_descriptions() {
         using recompinput::GameInput;
@@ -46,9 +50,17 @@ void conker::init_config() {
     // Used by the look mode (look_aim.cpp). Mouse sensitivity defaults to 0, which leaves the
     // mouse, and the cursor, alone.
     general_options.has_gyro_sensitivity = true;
+#if defined(__ANDROID__)
+    // No mouse on a phone; its gyro aims instead (conker_android_add_options).
+    general_options.has_mouse_sensitivity = false;
+#else
     general_options.has_mouse_sensitivity = true;
+#endif
     auto& general_config = recompui::config::create_general_tab(general_options);
     conker::look_aim::add_options(general_config);
+#if defined(__ANDROID__)
+    conker_android_add_options(general_config);
+#endif
 
     recompui::config::create_graphics_tab();
 

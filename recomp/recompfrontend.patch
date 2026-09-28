@@ -11,6 +11,23 @@ index 899372b..04da5c7 100644
      target_include_directories(recompinput PRIVATE ${SDL2_INCLUDE_DIRS})
  endif()
  
+diff --git a/recompinput/src/input_state.cpp b/recompinput/src/input_state.cpp
+index 03ed871..3ca3d9b 100644
+--- a/recompinput/src/input_state.cpp
++++ b/recompinput/src/input_state.cpp
+@@ -307,6 +307,12 @@ void recompinput::get_gyro_deltas(int controller_num, float* x, float* y) {
+ }
+ 
+ void recompinput::get_mouse_deltas(float* x, float* y) {
++    // Without the option (the game has no mouse aiming), there's no movement to report.
++    if (!recompui::config::general::has_mouse_sensitivity_option()) {
++        *x = 0.0f;
++        *y = 0.0f;
++        return;
++    }
+     std::array<float, 2> cur_mouse_delta = InputState.mouse_delta;
+     float sensitivity = (float)recompui::config::general::get_mouse_sensitivity() / 100.0f;
+     *x = cur_mouse_delta[0] * sensitivity;
 diff --git a/recompui/CMakeLists.txt b/recompui/CMakeLists.txt
 index 4dce8e0..15bd9e3 100644
 --- a/recompui/CMakeLists.txt
@@ -24,6 +41,24 @@ index 4dce8e0..15bd9e3 100644
      target_include_directories(recompui PRIVATE ${SDL2_INCLUDE_DIRS})
  endif()
  
+diff --git a/recompui/src/config/ui_config_tab_general.cpp b/recompui/src/config/ui_config_tab_general.cpp
+index 296ce0e..5e0b7fd 100644
+--- a/recompui/src/config/ui_config_tab_general.cpp
++++ b/recompui/src/config/ui_config_tab_general.cpp
+@@ -136,7 +136,12 @@ namespace config {
+             "<br/>"
+             "<b>This setting does not affect keyboard input.</b>",
+             background_input_options,
+-            BackgroundInputMode::On
++            BackgroundInputMode::On,
++#if defined(__ANDROID__)
++            true // hidden: Android pauses an app in the background
++#else
++            false
++#endif
+         );
+ 
+         return config;
 diff --git a/recompui/src/renderer/rt64_render_context.cpp b/recompui/src/renderer/rt64_render_context.cpp
 index a7954c7..54fb135 100644
 --- a/recompui/src/renderer/rt64_render_context.cpp

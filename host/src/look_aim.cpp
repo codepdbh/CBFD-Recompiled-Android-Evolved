@@ -32,6 +32,10 @@
 #include "recompui/config.h"
 #endif
 
+#if defined(__ANDROID__) && defined(CONKER_RT64)
+bool conker_android_take_gyro(float* x, float* y); // android/touch_controls.cpp
+#endif
+
 namespace {
     // Field offsets (see above).
     constexpr int32_t target_yaw = 0x34, target_pitch = 0x38;      // $t0
@@ -133,15 +137,21 @@ void conker::look_aim::add_options(recomp::config::Config& config) {
     config.add_enum_option(options::stick_invert, "R-Look: Invert Stick",
         "Inverts the stick in R-Look (hold R and look around), separately from the mouse and gyro. <recomp-color primary>Invert Y</recomp-color> is the default and matches the original game: pushing the stick up looks down.",
         invert, Invert::Y);
+    // A phone has no mouse: the mouse's options are kept (hidden) for the look mode to read.
+#if defined(__ANDROID__)
+    constexpr bool no_mouse = true;
+#else
+    constexpr bool no_mouse = false;
+#endif
     config.add_enum_option(options::mouse_response, "R-Look: Mouse Response",
         "How the view follows the mouse in R-Look (hold R and look around). Needs Mouse Sensitivity above zero." + about,
-        response, Response::Smooth);
+        response, Response::Smooth, no_mouse);
     config.add_enum_option(options::gyro_response, "R-Look: Gyro Response",
         "How the view follows gyro in R-Look (hold R and look around). Needs Gyro Sensitivity above zero." + about,
         response, Response::Smooth);
     config.add_enum_option(options::mouse_invert, "R-Look: Invert Mouse",
         "Inverts the mouse in R-Look (hold R and look around), separately from the stick and gyro. With <recomp-color primary>None</recomp-color>, moving the mouse up looks up; <recomp-color primary>Invert Y</recomp-color> matches the game's stick, where up looks down.",
-        invert, Invert::None);
+        invert, Invert::None, no_mouse);
     config.add_enum_option(options::gyro_invert, "R-Look: Invert Gyro",
         "Inverts gyro in R-Look (hold R and look around), separately from the stick and the mouse. With <recomp-color primary>None</recomp-color>, the view turns the way the controller is turned.",
         invert, Invert::None);
@@ -153,6 +163,16 @@ void conker::look_aim::on_input_poll() {
     Movement m;
     recompinput::get_mouse_deltas(&m.mouse_x, &m.mouse_y);
     recompinput::get_gyro_deltas(0, &m.gyro_x, &m.gyro_y);
+#if defined(__ANDROID__)
+    // The phone's own gyro, in degrees turned: at the default 25% Gyro Sensitivity, the view
+    // turns as far as the phone does.
+    float phone_x, phone_y;
+    if (conker_android_take_gyro(&phone_x, &phone_y)) {
+        const float scale = (float)recompui::config::general::get_gyro_sensitivity() / 25.0f / gyro_scale;
+        m.gyro_x += phone_x * scale;
+        m.gyro_y += phone_y * scale;
+    }
+#endif
     std::lock_guard lock{queue_mutex};
     queue.push_back(m);
     while (queue.size() > 2) {

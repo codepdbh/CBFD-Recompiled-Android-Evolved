@@ -5,9 +5,16 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.RectF;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
 import android.util.Log;
 import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
+import android.view.Surface;
 import android.view.View;
 
 import org.json.JSONObject;
@@ -49,7 +56,25 @@ public class TouchControlsView extends View {
 
     static native void nativeSetButton(int button, boolean pressed);
     static native void nativeSetAxis(int axis, int value);
-    static native boolean nativeMenuOpen();
+    static native void nativeAddGyro(float x, float y);
+    /** { visible, opacity (0 to 1), haptics }, from the game's settings and menus. */
+    static native float[] nativeGetState();
+
+    private static Vibrator vibrator;
+
+    /** The game's rumble on the touch controller (touch_controls.cpp): 0 stops it. */
+    static void rumble(float strength) {
+        Vibrator v = vibrator;
+        if (v == null) {
+            return;
+        }
+        if (strength <= 0.01f) {
+            v.cancel();
+        } else {
+            int amplitude = Math.max(1, Math.min(255, Math.round(strength * 255)));
+            v.vibrate(VibrationEffect.createOneShot(1000, amplitude));
+        }
+    }
 
     private enum Kind { BUTTON, TRIGGER, C_BUTTON, STICK }
 
@@ -110,34 +135,85 @@ public class TouchControlsView extends View {
     private final String[] toolLabels = { "−", "+", "Reset", "Done" };
     private final RectF[] toolRects = { new RectF(), new RectF(), new RectF(), new RectF() };
 
-    /** Hidden while a menu has the input: touches go to it then. */
+    /**
+     * Hidden while a menu has the input (touches go to it then), or as the Touch Controls
+     * setting says; opacity and haptics come from the settings too.
+     */
     private boolean hidden = true;
-    private final Runnable checkMenu = new Runnable() {
+    private float opacity = 0.6f;
+    private boolean haptics = true;
+    private final Runnable checkState = new Runnable() {
         @Override
         public void run() {
-            boolean menuOpen;
+            float[] state = null;
             try {
-                menuOpen = nativeMenuOpen();
+                state = nativeGetState();
             } catch (UnsatisfiedLinkError e) {
-                menuOpen = false;
+                // The game's library isn't there.
             }
-            if (menuOpen != hidden) {
-                hidden = menuOpen;
-                if (hidden) {
-                    releaseAll();
-                    if (editing) {
-                        finishEditing();
+            if (state != null) {
+                boolean newHidden = state[0] < 0.5f;
+                boolean changed = newHidden != hidden || Math.abs(state[1] - opacity) > 0.01f;
+                haptics = state[2] > 0.5f;
+                opacity = state[1];
+                if (newHidden != hidden) {
+                    hidden = newHidden;
+                    if (hidden) {
+                        releaseAll();
+                        if (editing) {
+                            finishEditing();
+                        }
                     }
                 }
-                invalidate();
+                if (changed) {
+                    invalidate();
+                }
             }
             postDelayed(this, 150);
         }
     };
 
+    // The phone's gyro, in degrees turned around the screen's axes (x: tilting toward you,
+    // y: turning left), for aiming in R-Look (look_aim.cpp).
+    private final SensorManager sensors;
+    private long lastGyroTime = 0;
+    private final SensorEventListener gyroListener = new SensorEventListener() {
+        @Override
+        public void onSensorChanged(SensorEvent event) {
+            if (lastGyroTime != 0) {
+                float dt = (event.timestamp - lastGyroTime) * 1e-9f;
+                if (dt > 0 && dt < 0.1f) {
+                    // The sensor's axes are the phone's natural (portrait) ones: turn them to the
+                    // landscape screen's.
+                    float wx = event.values[0], wy = event.values[1];
+                    float sx, sy;
+                    if (getDisplay() != null && getDisplay().getRotation() == Surface.ROTATION_270) {
+                        sx = -wy;
+                        sy = wx;
+                    } else {
+                        sx = wy;
+                        sy = -wx;
+                    }
+                    float toDegrees = (float) (180.0 / Math.PI) * dt;
+                    try {
+                        nativeAddGyro(sx * toDegrees, sy * toDegrees);
+                    } catch (UnsatisfiedLinkError e) {
+                        // The game's library isn't there.
+                    }
+                }
+            }
+            lastGyroTime = event.timestamp;
+        }
+
+        @Override
+        public void onAccuracyChanged(Sensor sensor, int accuracy) {}
+    };
+
     public TouchControlsView(Context context) {
         super(context);
         density = context.getResources().getDisplayMetrics().density;
+        sensors = (SensorManager) context.getSystemService(Context.SENSOR_SERVICE);
+        vibrator = (Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE);
         stick = new Control("stick", Kind.STICK, "", 0, 0.15f, 0.68f, 64, GREY, false);
         controls.add(stick);
         controls.add(new Control("z", Kind.TRIGGER, "Z", AXIS_TRIGGERLEFT, 0.07f, 0.36f, 30, GREY, false));
@@ -165,13 +241,31 @@ public class TouchControlsView extends View {
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
-        post(checkMenu);
+        post(checkState);
+        resumeSensors();
     }
 
     @Override
     protected void onDetachedFromWindow() {
-        removeCallbacks(checkMenu);
+        removeCallbacks(checkState);
+        pauseSensors();
         super.onDetachedFromWindow();
+    }
+
+    /** GameActivity, when the game shows and goes away. */
+    void resumeSensors() {
+        Sensor gyro = sensors != null ? sensors.getDefaultSensor(Sensor.TYPE_GYROSCOPE) : null;
+        if (gyro != null) {
+            lastGyroTime = 0;
+            sensors.registerListener(gyroListener, gyro, SensorManager.SENSOR_DELAY_GAME);
+        }
+    }
+
+    void pauseSensors() {
+        if (sensors != null) {
+            sensors.unregisterListener(gyroListener);
+        }
+        rumble(0);
     }
 
     @Override
@@ -209,9 +303,12 @@ public class TouchControlsView extends View {
         if (editing) {
             canvas.drawColor(0x66000000);
         }
+        // The Opacity setting fades the controls (not while editing them).
+        int layer = canvas.saveLayerAlpha(null, editing ? 255 : Math.round(255 * clamp(opacity, 0.05f, 1)));
         for (Control c : controls) {
             drawControl(canvas, c);
         }
+        canvas.restoreToCount(layer);
         drawEditButton(canvas);
         if (editing) {
             drawToolbar(canvas);
@@ -220,7 +317,7 @@ public class TouchControlsView extends View {
 
     private void drawControl(Canvas canvas, Control c) {
         boolean lit = c.pressed || (editing && c == selected);
-        fill.setColor((c.color & 0x00FFFFFF) | ((lit ? 0xB0 : 0x55) << 24));
+        fill.setColor((c.color & 0x00FFFFFF) | ((lit ? 0xE0 : 0x90) << 24));
         stroke.setColor(editing && c == selected ? ORANGE : (0x00FFFFFF | ((lit ? 0xE0 : 0x90) << 24)));
         if (c.kind == Kind.STICK) {
             canvas.drawCircle(c.cx, c.cy, c.radius, fill);
@@ -309,7 +406,9 @@ public class TouchControlsView extends View {
                 if (c == stick) {
                     moveStick(event.getX(index), event.getY(index));
                 }
-                performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+                if (haptics) {
+                    performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
+                }
                 break;
             }
             case MotionEvent.ACTION_MOVE:

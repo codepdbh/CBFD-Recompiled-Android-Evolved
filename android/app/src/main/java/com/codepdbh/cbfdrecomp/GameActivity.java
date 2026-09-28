@@ -17,6 +17,8 @@ import java.util.List;
  * on-screen controls over it.
  */
 public class GameActivity extends SDLActivity {
+    private TouchControlsView touchControls;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -24,10 +26,28 @@ public class GameActivity extends SDLActivity {
         getWindow().getAttributes().layoutInDisplayCutoutMode =
             WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
         if (mLayout != null) {
-            addContentView(new TouchControlsView(this), new ViewGroup.LayoutParams(
+            touchControls = new TouchControlsView(this);
+            addContentView(touchControls, new ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         }
         hideSystemBars();
+    }
+
+    // The phone's gyro only while the game shows.
+    @Override
+    protected void onPause() {
+        if (touchControls != null) {
+            touchControls.pauseSensors();
+        }
+        super.onPause();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        if (touchControls != null && touchControls.isAttachedToWindow()) {
+            touchControls.resumeSensors();
+        }
     }
 
     @Override
@@ -71,8 +91,7 @@ public class GameActivity extends SDLActivity {
         args.add(folder.getAbsolutePath());
         // MainActivity is the launcher: straight into the game.
         args.add("--start");
-        // A ROM put in the folder is loaded (and kept) the first time: the launcher's
-        // Load ROM has no file picker on Android yet.
+        // The ROM picked on the start screen is checked and kept the first time.
         File rom = new File(folder, "rom.z64");
         if (rom.isFile()) {
             args.add("--rom");

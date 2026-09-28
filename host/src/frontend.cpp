@@ -82,6 +82,8 @@ namespace {
         // Back doesn't end the game: it's a key the game ignores (the on-screen menu button
         // opens the menu).
         SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
+        // SDL would list the phone's accelerometer as a joystick (the gyro aims instead).
+        SDL_SetHint(SDL_HINT_ACCELEROMETER_AS_JOYSTICK, "0");
 #endif
         // Debugging aid: CONKER_NO_CONTROLLER=1 ignores game controllers, e.g. for test
         // runs while someone else is playing with the controller on the same machine.

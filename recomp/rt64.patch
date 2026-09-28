@@ -1142,7 +1142,7 @@ index 5a331aa..3d4fca2 100644
                                  G_IM_FMT_DEPTH, f, depthFb->readHeight, readRowCount, ext.shaderLibrary);
  
 diff --git a/src/render/rt64_framebuffer_renderer.cpp b/src/render/rt64_framebuffer_renderer.cpp
-index 9fae0d4..2046b61 100644
+index 9fae0d4..b8acce6 100644
 --- a/src/render/rt64_framebuffer_renderer.cpp
 +++ b/src/render/rt64_framebuffer_renderer.cpp
 @@ -7,6 +7,7 @@
@@ -1189,7 +1189,22 @@ index 9fae0d4..2046b61 100644
                  if (useWideViewport) {
                      projInvRatioScale = 1.0f;
                  }
-@@ -1625,6 +1644,7 @@ namespace RT64 {
+@@ -1607,7 +1626,14 @@ namespace RT64 {
+                     {
+                         triangles.shaderDesc = call.shaderDesc;
+ 
++#                   if defined(__ANDROID__)
++                        // Mobile GPUs struggle with the ubershader (its heavy draws at the start of the game could
++                        // lose the device on Adreno): wait for the draw's own shader instead, which only costs a
++                        // pause the first time one is needed.
++                        RasterShader *gpuShader = p.ubershadersOnly ? nullptr : p.rasterShaderCache->waitForGPUShader(call.shaderDesc, std::chrono::milliseconds(2000));
++#                   else
+                         RasterShader *gpuShader = p.ubershadersOnly ? nullptr : p.rasterShaderCache->getGPUShader(call.shaderDesc);
++#                   endif
+                         if (gpuShader != nullptr) {
+                             triangles.pipeline = gpuShader->pipeline.get();
+                         }
+@@ -1625,6 +1651,7 @@ namespace RT64 {
  
                          float invRatioScale = 1.0f / aspectRatioScale;
                          float horizontalMisalignment = 0.0f;
@@ -1197,7 +1212,7 @@ index 9fae0d4..2046b61 100644
                          switch (proj.type) {
                          case Projection::Type::Perspective:
                          case Projection::Type::Orthographic: {
-@@ -1645,14 +1665,46 @@ namespace RT64 {
+@@ -1645,14 +1672,46 @@ namespace RT64 {
                              // The call's scissor spans the whole width of the framebuffer pair scissor. The rect must not be using extended origins.
                              const bool regularOrigins = (call.callDesc.rectLeftOrigin == G_EX_ORIGIN_NONE) && (call.callDesc.rectRightOrigin == G_EX_ORIGIN_NONE);
                              const bool coversScissorWidth = regularOrigins && (call.callDesc.rect.ulx <= fbPair.scissorRect.ulx) && (call.callDesc.rect.lrx >= fbPair.scissorRect.lrx);
@@ -1245,7 +1260,7 @@ index 9fae0d4..2046b61 100644
                              triangles.screenScale = { viewportRect.width / framebuffer.viewport.width, viewportRect.height / framebuffer.viewport.height };
                              triangles.screenOffset.x = halfPixelOffset.x + ((viewportRect.x + viewportRect.width / 2.0f) - halfViewportSize.x) / halfViewportSize.x;
                              triangles.screenOffset.y = halfPixelOffset.y + (halfViewportSize.y - (viewportRect.y + viewportRect.height / 2.0f)) / halfViewportSize.y;
-@@ -1676,7 +1728,12 @@ namespace RT64 {
+@@ -1676,7 +1735,12 @@ namespace RT64 {
                              break;
                          }
  
@@ -1322,6 +1337,82 @@ index e842dcc..d304ec4 100644
  
                  // We only interpolate the projection if the view matrix has been interpolated.
                  const bool interpolateProjection = rigidBody->lerpTranslation || rigidBody->lerpRotation;
+diff --git a/src/render/rt64_raster_shader_cache.cpp b/src/render/rt64_raster_shader_cache.cpp
+index bf7b669..38799c9 100644
+--- a/src/render/rt64_raster_shader_cache.cpp
++++ b/src/render/rt64_raster_shader_cache.cpp
+@@ -31,7 +31,10 @@ namespace RT64 {
+         Thread::setCurrentThreadName("RT64 Shader");
+ 
+         // The shader compilation thread should have idle priority by default as the application can use the ubershader in the meantime.
++        // Not on Android, where drawing waits for its shaders instead (see waitForGPUShader).
++#   if !defined(__ANDROID__)
+         Thread::setCurrentThreadPriority(Thread::Priority::Idle);
++#   endif
+ 
+         threadRunning = true;
+ 
+@@ -66,6 +69,8 @@ namespace RT64 {
+                     const std::unique_lock<std::mutex> lock(shaderCache->GPUShadersMutex);
+                     shaderCache->GPUShaders[shaderDesc.hash()] = std::move(newShader);
+                 }
++
++                shaderCache->GPUShadersChanged.notify_all();
+             }
+         }
+     }
+@@ -171,6 +176,23 @@ namespace RT64 {
+         return shaderIt->second.get();
+     }
+ 
++    // The shader for the description, waiting up to the timeout for it to be compiled (submitting it
++    // if it hasn't been). Null if it isn't ready by then.
++    RasterShader *RasterShaderCache::waitForGPUShader(const ShaderDescription &desc, std::chrono::milliseconds timeout) {
++        submit(desc);
++
++        const uint64_t shaderHash = desc.hash();
++        std::unique_lock<std::mutex> lock(GPUShadersMutex);
++        RasterShader *shader = nullptr;
++        GPUShadersChanged.wait_for(lock, timeout, [&]() {
++            auto shaderIt = GPUShaders.find(shaderHash);
++            shader = (shaderIt != GPUShaders.end()) ? shaderIt->second.get() : nullptr;
++            return shader != nullptr;
++        });
++
++        return shader;
++    }
++
+     RasterShaderUber *RasterShaderCache::getGPUShaderUber() const {
+         return shaderUber.get();
+     }
+diff --git a/src/render/rt64_raster_shader_cache.h b/src/render/rt64_raster_shader_cache.h
+index 5c40c18..ce86cab 100644
+--- a/src/render/rt64_raster_shader_cache.h
++++ b/src/render/rt64_raster_shader_cache.h
+@@ -5,6 +5,7 @@
+ #pragma once
+ 
+ #include <atomic>
++#include <chrono>
+ #include <condition_variable>
+ #include <filesystem>
+ #include <fstream>
+@@ -38,6 +39,7 @@ namespace RT64 {
+         std::unordered_map<uint64_t, bool> shaderHashes;
+         std::unordered_map<uint64_t, std::unique_ptr<RasterShader>> GPUShaders;
+         std::mutex GPUShadersMutex;
++        std::condition_variable GPUShadersChanged;
+         std::list<std::unique_ptr<CompilationThread>> compilationThreads;
+         uint32_t threadCount;
+         uint32_t ubershaderThreadCount;
+@@ -53,6 +55,7 @@ namespace RT64 {
+         void waitForAll();
+         void destroyAll();
+         RasterShader *getGPUShader(const ShaderDescription &desc);
++        RasterShader *waitForGPUShader(const ShaderDescription &desc, std::chrono::milliseconds timeout);
+         RasterShaderUber *getGPUShaderUber() const;
+         uint32_t shaderCount();
+     };
 diff --git a/src/render/rt64_shader_library.cpp b/src/render/rt64_shader_library.cpp
 index d1c5273..77dc074 100644
 --- a/src/render/rt64_shader_library.cpp
