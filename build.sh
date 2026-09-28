@@ -181,6 +181,8 @@ apply_patch() {
 step "Patching the tools"
 apply_patch tools/N64Recomp recomp/n64recomp.patch
 apply_patch tools/N64ModernRuntime recomp/n64modernruntime.patch
+# The N64Recomp inside N64ModernRuntime (its recomp.h builds the game): 32-bit hosts.
+apply_patch tools/N64ModernRuntime/N64Recomp recomp/n64modernruntime-n64recomp.patch
 apply_patch tools/rt64 recomp/rt64.patch
 # plume (RT64's rendering layer, its submodule): Android's window coming back from the background.
 apply_patch tools/rt64/src/contrib/plume recomp/plume.patch

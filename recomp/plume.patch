@@ -1,7 +1,16 @@
 diff --git a/plume_vulkan.cpp b/plume_vulkan.cpp
-index f1dd503..db1f447 100644
+index f1dd503..5fa084b 100644
 --- a/plume_vulkan.cpp
 +++ b/plume_vulkan.cpp
+@@ -1855,7 +1855,7 @@ namespace plume {
+ 
+         this->descriptorSetCount = uint32_t(pipelineLayout->descriptorSetLayouts.size());
+ 
+-        VkResult res = vkCreateRayTracingPipelinesKHR(device->vk, nullptr, nullptr, 1, &pipelineInfo, nullptr, &vk);
++        VkResult res = vkCreateRayTracingPipelinesKHR(device->vk, VK_NULL_HANDLE, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &vk);
+         if (res != VK_SUCCESS) {
+             fprintf(stderr, "vkCreateRayTracingPipelinesKHR failed with error code 0x%X.\n", res);
+             return;
 @@ -2073,6 +2073,35 @@ namespace plume {
  
      // VulkanSwapChain

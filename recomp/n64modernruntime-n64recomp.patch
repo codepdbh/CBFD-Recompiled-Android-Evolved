@@ -1,0 +1,38 @@
+diff --git a/include/recomp.h b/include/recomp.h
+index 73f3e73..fc77e75 100644
+--- a/include/recomp.h
++++ b/include/recomp.h
+@@ -67,7 +67,32 @@ static inline void DMULTU(uint64_t a, uint64_t b, uint64_t* lo64, uint64_t* hi64
+ }
+ 
+ #else
+-#error "128-bit integer type not found"
++// No 128-bit integers (32-bit hosts): the 128-bit product from 32-bit halves.
++static inline void DMULTU(uint64_t a, uint64_t b, uint64_t* lo64, uint64_t* hi64) {
++    uint64_t a_lo = (uint32_t)a, a_hi = a >> 32;
++    uint64_t b_lo = (uint32_t)b, b_hi = b >> 32;
++    uint64_t lo_lo = a_lo * b_lo;
++    uint64_t hi_lo = a_hi * b_lo;
++    uint64_t lo_hi = a_lo * b_hi;
++    uint64_t hi_hi = a_hi * b_hi;
++    uint64_t cross = (lo_lo >> 32) + (uint32_t)hi_lo + lo_hi;
++    *lo64 = (cross << 32) | (uint32_t)lo_lo;
++    *hi64 = (hi_lo >> 32) + (cross >> 32) + hi_hi;
++}
++
++static inline void DMULT(int64_t a, int64_t b, int64_t* lo64, int64_t* hi64) {
++    uint64_t lo, hi;
++    DMULTU((uint64_t)a, (uint64_t)b, &lo, &hi);
++    // Signed: take off b for a negative a and a for a negative b.
++    if (a < 0) {
++        hi -= (uint64_t)b;
++    }
++    if (b < 0) {
++        hi -= (uint64_t)a;
++    }
++    *lo64 = (int64_t)lo;
++    *hi64 = (int64_t)hi;
++}
+ #endif
+ 
+ static inline void DDIV(int64_t a, int64_t b, int64_t* quot, int64_t* rem) {

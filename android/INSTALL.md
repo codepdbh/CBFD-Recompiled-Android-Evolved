@@ -9,8 +9,8 @@ Guía de instalación para Android.
 
 - **Android 11 o superior.**
 - **Procesador de 64 bits (ARM64 / arm64-v8a).** Casi todos los teléfonos de los
-  últimos años lo son. **No funciona en teléfonos de 32 bits (ARMv7)**: el juego
-  necesita más memoria de la que un proceso de 32 bits puede usar.
+  últimos años lo son. Para teléfonos de **32 bits (ARMv7)** hay una versión
+  **ALPHA experimental** (ver abajo).
 - **GPU con Vulkan 1.1.**
 - Unos **300 MB libres**: la ROM ocupa 64 MB y el juego guarda una copia verificada.
 - Recomendado: un procesador de gama alta reciente (por ejemplo, Snapdragon 8 Gen 2
@@ -24,8 +24,22 @@ De la página de [Releases](https://github.com/codepdbh/CBFD-Recompiled-Android-
 
 | Archivo | Para qué |
 |---|---|
-| `ConkerRecompiled-Android-vX.Y.Z-arm64-v8a.apk` | El juego. **Obligatorio.** |
+| `ConkerRecompiled-Android-vX.Y.Z-arm64-v8a.apk` | El juego para teléfonos de 64 bits. **Usa esta.** |
+| `ConkerRecompiled-Android-vX.Y.Z-armeabi-v7a.apk` | **ALPHA** para teléfonos de 32 bits. Ver abajo. |
 | `ConkerRecompiled-Mods-vX.Y.Z.zip` | Mods opcionales: Skip Intro, Skip Any Cutscene y Cheats. |
+
+**¿Cuál descargo?** Casi siempre la **arm64-v8a**. Si no sabes cuál es tu
+teléfono, instala una app como *CPU-Z* y mira "Instruction set" o "Kernel
+Architecture": si dice `arm64`/`aarch64`, usa arm64-v8a.
+
+### Versión de 32 bits (ALPHA)
+
+La APK `armeabi-v7a` es **experimental y no se ha probado en ningún teléfono**:
+puede ir muy lenta, verse mal o cerrarse. Además:
+
+- **No tiene mods**: el sistema de mods necesita un procesador de 64 bits.
+- Necesita igualmente **Android 11 y Vulkan 1.1**, que pocos teléfonos de 32 bits tienen.
+- Si tu teléfono es de 64 bits, **no la uses**: la arm64-v8a es mejor en todo.
 
 ## Instalación
 

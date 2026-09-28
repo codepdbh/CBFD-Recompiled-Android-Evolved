@@ -164,6 +164,20 @@ index 1450565..032ed28 100644
 +
  #include "hlsl++.h"
 \ No newline at end of file
+diff --git a/src/common/rt64_tmem_hasher.h b/src/common/rt64_tmem_hasher.h
+index 8c6af2b..6e8179f 100644
+--- a/src/common/rt64_tmem_hasher.h
++++ b/src/common/rt64_tmem_hasher.h
+@@ -23,7 +23,8 @@ static unsigned bitScanForward64(uint64_t val) {
+         __assume(0);
+     }
+ #endif
+-#elif defined(__GNUC__) && (__GNUC__ >= 4) && defined(__LP64__)
++#elif defined(__GNUC__) && (__GNUC__ >= 4)
++    // __builtin_ctzll takes 64 bits on 32-bit hosts too.
+     return (unsigned)__builtin_ctzll(val);
+ #elif defined(__ICCARM__)
+     return (unsigned)__builtin_ctzll(val);
 diff --git a/src/gbi/rt64_gbi.cpp b/src/gbi/rt64_gbi.cpp
 index 7006549..4984e7c 100644
 --- a/src/gbi/rt64_gbi.cpp

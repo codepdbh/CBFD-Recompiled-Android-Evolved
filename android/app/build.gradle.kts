@@ -11,18 +11,25 @@ android {
         applicationId = "com.codepdbh.cbfdrecomp"
         minSdk = 30
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.2.0"
-        ndk {
-            // 64-bit only: the runtime reserves 4 GB of address space for the N64's memory, and
-            // mods patch arm64 (or x86-64) code. A 32-bit (armeabi-v7a) build can't work.
-            abiFilters += "arm64-v8a"
-        }
+        versionCode = 3
+        versionName = "0.2.1"
         externalNativeBuild {
             cmake {
                 // The recompiled game is far too slow unoptimised, even in debug builds.
-                arguments += listOf("-DCMAKE_BUILD_TYPE=RelWithDebInfo")
+                // ARM (not Thumb) code on 32-bit ARM: mods patch functions with ARM instructions.
+                arguments += listOf("-DCMAKE_BUILD_TYPE=RelWithDebInfo", "-DANDROID_ARM_MODE=arm")
             }
+        }
+    }
+
+    // An APK per ABI. arm64-v8a is the port; armeabi-v7a (32-bit) is an untested alpha, without
+    // mods (LiveRecomp needs a 64-bit host) and with the N64's memory unguarded.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a")
+            isUniversalApk = false
         }
     }
 
@@ -47,6 +54,18 @@ android {
         release {
             isMinifyEnabled = false
             signingConfig = signingConfigs.getByName("debug")
+        }
+    }
+
+    // Each ABI its own version code, the 64-bit one higher, so it wins where both would install.
+    applicationVariants.all {
+        val variant = this
+        variant.outputs.all {
+            val output = this as com.android.build.gradle.internal.api.ApkVariantOutputImpl
+            val abi = output.getFilter(com.android.build.OutputFile.ABI)
+            val abiCode = when (abi) { "arm64-v8a" -> 2; "armeabi-v7a" -> 1; else -> 0 }
+            output.versionCodeOverride = variant.versionCode * 10 + abiCode
+            output.outputFileName = "ConkerRecompiled-Android-v${variant.versionName}-${abi}.apk"
         }
     }
 

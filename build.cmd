@@ -69,6 +69,8 @@ echo.
 echo ==^> Patching the tools
 call :apply_patch tools/N64Recomp recomp/n64recomp.patch || exit /b 1
 call :apply_patch tools/N64ModernRuntime recomp/n64modernruntime.patch || exit /b 1
+rem The N64Recomp inside N64ModernRuntime (its recomp.h builds the game): 32-bit hosts.
+call :apply_patch tools/N64ModernRuntime/N64Recomp recomp/n64modernruntime-n64recomp.patch || exit /b 1
 call :apply_patch tools/rt64 recomp/rt64.patch || exit /b 1
 rem plume (RT64's rendering layer, its submodule): Android's window coming back from the background.
 call :apply_patch tools/rt64/src/contrib/plume recomp/plume.patch || exit /b 1

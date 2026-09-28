@@ -74,6 +74,14 @@ public class MainActivity extends Activity {
         modsButton.setOnClickListener(v -> showMods());
         findViewById(R.id.settings).setOnClickListener(v ->
             startActivity(new Intent(this, SettingsActivity.class)));
+        if (!android.os.Process.is64Bit()) {
+            // The 32-bit build: an alpha, and without mods (the runtime can't load them there).
+            modsButton.setVisibility(View.GONE);
+            TextView hint = findViewById(R.id.hint);
+            hint.setText("Versión de 32 bits (ALPHA): sin probar, puede ir lenta o cerrarse. "
+                + "Los mods no están disponibles. Si tu teléfono es de 64 bits, usa la versión arm64-v8a.");
+            hint.setTextColor(0xFFF08A24);
+        }
         restoreIfAsked(getIntent());
     }
 
