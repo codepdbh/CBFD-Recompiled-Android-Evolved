@@ -12,8 +12,10 @@
 //   --headless   null renderer, no window, input or sound
 //   --window WxH open the window at this size, e.g. 2520x1080 to try a 21:9 screen
 //                (the window mode, windowed or fullscreen, is still the setting's)
-//   --data DIR   the headless build's data folder (saves, mods), instead of conker_data/
-//                next to the executable: an Android app has no folder of its own there
+//   --data DIR   the data folder (saves, mods), instead of conker_data/ next to the
+//                executable (headless) or the launcher's app folder: an Android app has
+//                no folder of its own there. The window build runs in it, so its
+//                assets/ and portable.txt go there too.
 
 #include <atomic>
 #include <chrono>
@@ -398,9 +400,19 @@ namespace {
 #if defined(__ANDROID__) && !defined(CONKER_RT64)
 // The headless Android build is a library, started by its app (android_main.cpp).
 #define main conker_main
+#elif defined(__ANDROID__)
+// SDL's SDLActivity starts the game: main becomes SDL_main.
+#include <SDL_main.h>
+#endif
+
+#if defined(__ANDROID__)
+void conker_android_redirect_output(); // android_main.cpp
 #endif
 
 int main(int argc, char** argv) {
+#if defined(__ANDROID__)
+    conker_android_redirect_output();
+#endif
     // Unbuffered, so diagnostics (e.g. RT64's microcode hashes) survive a crash.
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     install_crash_handler();
@@ -438,12 +450,19 @@ int main(int argc, char** argv) {
     }
 
     std::filesystem::path old_data_dir = data_dir.empty() ? exe_directory(argv[0]) / "conker_data" : data_dir;
+#if defined(__ANDROID__)
+    // An app's HOME is /data, which it can't write to: RT64 keeps its settings in
+    // $HOME/.rt64, so keep them in the game's folder like everything else.
+    if (!data_dir.empty()) {
+        setenv("HOME", data_dir.string().c_str(), 1);
+    }
+#endif
 #if defined(CONKER_RT64)
     if (!headless) {
         // NFD_Init() is called once SDL is up (frontend.cpp's create_gfx).
         // recompui loads assets/ (and looks for portable.txt) relative to the working
         // directory: make that the executable's folder, wherever the game is started from.
-        std::filesystem::current_path(exe_directory(argv[0]));
+        std::filesystem::current_path(data_dir.empty() ? exe_directory(argv[0]) : data_dir);
         recompui::programconfig::set_program_id(conker::program_id());
         recomp::register_config_path(recompui::file::get_app_folder_path());
         migrate_old_data(old_data_dir, recomp::get_config_path());

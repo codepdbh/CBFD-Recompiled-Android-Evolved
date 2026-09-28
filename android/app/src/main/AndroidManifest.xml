@@ -3,9 +3,21 @@
     <!-- The game's folder is ConkerRecompiled/ at the root of the shared storage, where the
          player can put the ROM and mods; reading and writing it takes "All files access". -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <!-- Controller rumble. -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- RT64 renders with Vulkan 1.1 or later. -->
+    <uses-feature android:name="android.hardware.vulkan.version" android:version="0x401000" android:required="true" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <uses-feature android:name="android.hardware.gamepad" android:required="false" />
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
+
     <application
         android:label="Conker Recompiled"
-        android:extractNativeLibs="false">
+        android:extractNativeLibs="false"
+        android:appCategory="game"
+        android:isGame="true"
+        android:hardwareAccelerated="true">
         <activity
             android:name=".MainActivity"
             android:exported="true">
@@ -14,5 +26,13 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name=".GameActivity"
+            android:exported="false"
+            android:launchMode="singleInstance"
+            android:screenOrientation="sensorLandscape"
+            android:configChanges="layoutDirection|locale|orientation|uiMode|screenLayout|screenSize|smallestScreenSize|keyboard|keyboardHidden|navigation"
+            android:preferMinimalPostProcessing="true"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen" />
     </application>
 </manifest>

@@ -1,8 +1,98 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 79dfc38..aef4a58 100644
+index 79dfc38..03f8872 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -327,6 +327,7 @@ set (SOURCES
+@@ -69,9 +69,34 @@ set(ZSTD_LEGACY_SUPPORT OFF)
+ set(ZSTD_BUILD_STATIC ON)
+ set(ZSTD_BUILD_SHARED OFF)
+ 
+-add_subdirectory(src/tools/file_to_c)
++if (CMAKE_CROSSCOMPILING)
++    # Cross-compiling (Android): the build runs DXC and file_to_c on the build machine,
++    # not the target. file_to_c is a CMake script then, which runs anywhere.
++    if (CMAKE_HOST_WIN32)
++        set (DXC "${PROJECT_SOURCE_DIR}/src/contrib/dxc/bin/x64/dxc.exe")
++    elseif (CMAKE_HOST_APPLE)
++        if (CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "x86_64")
++            set (DXC "DYLD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/src/contrib/dxc/lib/x64" "${PROJECT_SOURCE_DIR}/src/contrib/dxc/bin/x64/dxc-macos")
++        else()
++            set (DXC "DYLD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/src/contrib/dxc/lib/arm64" "${PROJECT_SOURCE_DIR}/src/contrib/dxc/bin/arm64/dxc-macos")
++        endif()
++    elseif (CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "x86_64")
++        set (DXC "LD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/src/contrib/dxc/lib/x64" "${PROJECT_SOURCE_DIR}/src/contrib/dxc/bin/x64/dxc-linux")
++    else()
++        set (DXC "LD_LIBRARY_PATH=${PROJECT_SOURCE_DIR}/src/contrib/dxc/lib/arm64" "${PROJECT_SOURCE_DIR}/src/contrib/dxc/bin/arm64/dxc-linux")
++    endif()
++    set (FILE_TO_C "${CMAKE_COMMAND}" -P "${PROJECT_SOURCE_DIR}/src/tools/file_to_c/file_to_c.cmake")
++    set (FILE_TO_C_DEPENDS "${PROJECT_SOURCE_DIR}/src/tools/file_to_c/file_to_c.cmake")
++else()
++    add_subdirectory(src/tools/file_to_c)
++    set (FILE_TO_C file_to_c)
++    set (FILE_TO_C_DEPENDS file_to_c)
++endif()
+ add_subdirectory(src/contrib/re-spirv)
+-add_subdirectory(src/contrib/nativefiledialog-extended)
++# The program embedding RT64 may bring its own nfd (Android has no native file dialog).
++if (NOT TARGET nfd)
++    add_subdirectory(src/contrib/nativefiledialog-extended)
++endif()
+ add_subdirectory(src/contrib/zstd/build/cmake)
+ 
+ if (CMAKE_SYSTEM_NAME MATCHES "Linux" AND RT64_SDL_WINDOW_VULKAN)
+@@ -118,8 +143,8 @@ function(build_shader_spirv_impl TARGETOBJ FILENAME TARGET_NAME OUTNAME)
+         COMMAND ${DXC} ${DXC_SPV_OPTS} ${ARGN} ${FILENAME} /Fo ${OUTNAME}.spv
+         DEPENDS ${FILENAME})
+     add_custom_command(OUTPUT ${OUTNAME}.spirv.c
+-        COMMAND file_to_c ${OUTNAME}.spv ${TARGET_NAME}BlobSPIRV ${OUTNAME}.spirv.c ${OUTNAME}.spirv.h
+-        DEPENDS ${OUTNAME}.spv file_to_c
++        COMMAND ${FILE_TO_C} ${OUTNAME}.spv ${TARGET_NAME}BlobSPIRV ${OUTNAME}.spirv.c ${OUTNAME}.spirv.h
++        DEPENDS ${OUTNAME}.spv ${FILE_TO_C_DEPENDS}
+         BYPRODUCTS ${OUTNAME}.spirv.h)
+     target_sources(${TARGETOBJ} PRIVATE ${OUTNAME}.spirv.c)
+ endfunction()
+@@ -129,8 +154,8 @@ function(build_shader_dxil_impl TARGETOBJ FILENAME TARGET_NAME OUTNAME)
+         COMMAND ${DXC} ${DXC_DXIL_OPTS} ${ARGN} ${FILENAME} /Fo ${OUTNAME}.dxil
+         DEPENDS ${FILENAME})
+     add_custom_command(OUTPUT ${OUTNAME}.dxil.c
+-        COMMAND file_to_c ${OUTNAME}.dxil ${TARGET_NAME}BlobDXIL ${OUTNAME}.dxil.c ${OUTNAME}.dxil.h
+-        DEPENDS ${OUTNAME}.dxil file_to_c
++        COMMAND ${FILE_TO_C} ${OUTNAME}.dxil ${TARGET_NAME}BlobDXIL ${OUTNAME}.dxil.c ${OUTNAME}.dxil.h
++        DEPENDS ${OUTNAME}.dxil ${FILE_TO_C_DEPENDS}
+         BYPRODUCTS ${OUTNAME}.dxil.h)
+     target_sources(${TARGETOBJ} PRIVATE ${OUTNAME}.dxil.c)
+ endfunction()
+@@ -149,8 +174,8 @@ function(build_shader_msl_impl TARGETOBJ FILENAME TARGET_NAME OUTNAME)
+             COMMAND xcrun -sdk macosx metallib ${OUTNAME}.ir -o ${OUTNAME}.metallib
+             DEPENDS ${OUTNAME}.ir)
+     add_custom_command(OUTPUT ${OUTNAME}.metal.c
+-            COMMAND file_to_c ${OUTNAME}.metallib ${TARGET_NAME}BlobMSL ${OUTNAME}.metal.c ${OUTNAME}.metal.h
+-            DEPENDS ${OUTNAME}.metallib file_to_c
++            COMMAND ${FILE_TO_C} ${OUTNAME}.metallib ${TARGET_NAME}BlobMSL ${OUTNAME}.metal.c ${OUTNAME}.metal.h
++            DEPENDS ${OUTNAME}.metallib ${FILE_TO_C_DEPENDS}
+             BYPRODUCTS ${OUTNAME}.metal.h)
+     target_sources(${TARGETOBJ} PRIVATE ${OUTNAME}.metal.c)
+ endfunction()
+@@ -243,8 +268,8 @@ function(preprocess_shader TARGETOBJ SHADERNAME)
+     cmake_path(GET OUTNAME PARENT_PATH OUTPUT_DIR)
+     preprocess(${FILENAME} ${OUTNAME}.rw ${DXC_COMMON_OPTS})
+     add_custom_command(OUTPUT ${OUTNAME}.rw.c
+-        COMMAND file_to_c ${OUTNAME}.rw ${TARGET_NAME}Text ${OUTNAME}.rw.c ${OUTNAME}.rw.h
+-        DEPENDS ${OUTNAME}.rw file_to_c
++        COMMAND ${FILE_TO_C} ${OUTNAME}.rw ${TARGET_NAME}Text ${OUTNAME}.rw.c ${OUTNAME}.rw.h
++        DEPENDS ${OUTNAME}.rw ${FILE_TO_C_DEPENDS}
+         BYPRODUCTS ${OUTNAME}.rw.h)
+     file(MAKE_DIRECTORY ${OUTPUT_DIR})
+     target_sources(${TARGETOBJ} PRIVATE ${OUTNAME}.rw.c)
+@@ -289,6 +314,8 @@ if (WIN32)
+     set(SDL2_INCLUDE_DIRS "${PROJECT_SOURCE_DIR}/src/contrib/mupen64plus-win32-deps/SDL2-2.26.3/include")
+     set(SDL2_LIBRARIES "SDL2" "SDL2main")
+     link_directories("${PROJECT_SOURCE_DIR}/src/contrib/mupen64plus-win32-deps/SDL2-2.26.3/lib/x64")
++elseif (TARGET SDL2::SDL2)
++    # The embedding program built SDL2 itself (Android) and set SDL2_INCLUDE_DIRS and SDL2_LIBRARIES.
+ else()
+     find_package(SDL2 REQUIRED)
+ endif()
+@@ -327,6 +354,7 @@ set (SOURCES
      "${PROJECT_SOURCE_DIR}/src/gbi/rt64_gbi_f3d.cpp"
      "${PROJECT_SOURCE_DIR}/src/gbi/rt64_gbi_f3dex.cpp"
      "${PROJECT_SOURCE_DIR}/src/gbi/rt64_gbi_f3dex2.cpp"
@@ -10,6 +100,19 @@ index 79dfc38..aef4a58 100644
      "${PROJECT_SOURCE_DIR}/src/gbi/rt64_gbi_f3dgolden.cpp"
      "${PROJECT_SOURCE_DIR}/src/gbi/rt64_gbi_f3dpd.cpp"
      "${PROJECT_SOURCE_DIR}/src/gbi/rt64_gbi_f3dwave.cpp"
+@@ -446,8 +474,10 @@ target_link_libraries(rt64 libzstd_static)
+ target_link_libraries(rt64 plume)
+ 
+ # Add tools.
+-add_subdirectory(src/tools/texture_hasher)
+-add_subdirectory(src/tools/texture_packer)
++if (NOT CMAKE_CROSSCOMPILING)
++    add_subdirectory(src/tools/texture_hasher)
++    add_subdirectory(src/tools/texture_packer)
++endif()
+ 
+ # Add any Apple-specific source files and libraries
+ if (APPLE)
 diff --git a/include/rt64_extended_gbi.h b/include/rt64_extended_gbi.h
 index d387090..75ab87d 100644
 --- a/include/rt64_extended_gbi.h
@@ -25,7 +128,7 @@ index d387090..75ab87d 100644
  #define G_EX_VERTEX_POSITION        0x0
  #define G_EX_VERTEX_VELOCITY        0x1
 diff --git a/src/common/rt64_common.h b/src/common/rt64_common.h
-index f79adbf..6e0a6f9 100644
+index f79adbf..e40a61d 100644
 --- a/src/common/rt64_common.h
 +++ b/src/common/rt64_common.h
 @@ -70,6 +70,18 @@ namespace RT64 {
@@ -47,92 +150,6 @@ index f79adbf..6e0a6f9 100644
      struct FixedRect {
          int32_t ulx;
          int32_t uly;
-diff --git a/src/common/rt64_fblog.h b/src/common/rt64_fblog.h
-new file mode 100644
-index 0000000..c9dd621
---- /dev/null
-+++ b/src/common/rt64_fblog.h
-@@ -0,0 +1,80 @@
-+//
-+// RT64
-+//
-+
-+// TEMP-DEBUG (Conker): a log of what happens to framebuffers, depth and widening, for the
-+// widescreen door clipping. Off unless CONKER_RT64_FBLOG is set. It then logs 2 frames out of
-+// every 150 (about every 5 seconds), 40 times, to rt64_fb_log.txt in the working directory.
-+// Frames are workload submission frames: the same number on the game's side (hle) and on the
-+// renderer's side, which run on different threads.
-+
-+#pragma once
-+
-+#include <cstdarg>
-+#include <cstdint>
-+#include <cstdio>
-+#include <cstdlib>
-+#include <mutex>
-+
-+namespace RT64 {
-+    namespace FbLog {
-+        constexpr uint64_t Period = 150;
-+        constexpr uint64_t FramesPerCapture = 2;
-+        constexpr uint64_t Captures = 40;
-+
-+        inline bool enabled() {
-+            static const bool on = (std::getenv("CONKER_RT64_FBLOG") != nullptr);
-+            return on;
-+        }
-+
-+        inline bool frameLogged(uint64_t frame) {
-+            return enabled() && ((frame % Period) < FramesPerCapture) && ((frame / Period) < Captures);
-+        }
-+
-+        // The frame being processed on this thread, for code that doesn't know its workload.
-+        inline uint64_t &threadFrame() {
-+            thread_local uint64_t frame = UINT64_MAX;
-+            return frame;
-+        }
-+
-+        // Which side this thread is: "hle" (the game's display lists, and the native render to
-+        // RDRAM) or "hires" (the widened picture on screen).
-+        inline const char *&threadSide() {
-+            thread_local const char *side = "?";
-+            return side;
-+        }
-+
-+        inline void setThreadFrame(uint64_t frame, const char *side = nullptr) {
-+            threadFrame() = frame;
-+            if (side != nullptr) {
-+                threadSide() = side;
-+            }
-+        }
-+
-+        inline bool threadActive() {
-+            return (threadFrame() != UINT64_MAX) && frameLogged(threadFrame());
-+        }
-+
-+        inline void print(const char *fmt, ...) {
-+            static std::mutex mutex;
-+            static FILE *file = nullptr;
-+            std::lock_guard<std::mutex> lock(mutex);
-+            if (file == nullptr) {
-+                file = std::fopen("rt64_fb_log.txt", "w");
-+                if (file == nullptr) {
-+                    return;
-+                }
-+            }
-+
-+            va_list args;
-+            va_start(args, fmt);
-+            std::vfprintf(file, fmt, args);
-+            va_end(args);
-+            std::fputc('\n', file);
-+            std::fflush(file);
-+        }
-+    };
-+};
-+
-+#define RT64_FBLOG_RECT(r) (r).ulx, (r).uly, (r).lrx, (r).lry
-+#define RT64_FBLOG_RECT_FMT "(%d,%d)-(%d,%d)"
 diff --git a/src/common/rt64_hlslpp.h b/src/common/rt64_hlslpp.h
 index 1450565..032ed28 100644
 --- a/src/common/rt64_hlslpp.h
@@ -226,157 +243,83 @@ index 69c35d2..bcea8ec 100644
          Count
      };
  
-diff --git a/src/gbi/rt64_gbi_f3dex2cbfd.cpp b/src/gbi/rt64_gbi_f3dex2cbfd.cpp
-new file mode 100644
-index 0000000..3db0968
---- /dev/null
-+++ b/src/gbi/rt64_gbi_f3dex2cbfd.cpp
-@@ -0,0 +1,119 @@
-+//
-+// RT64
-+//
-+// Conker's Bad Fur Day's modified F3DEX2, based on GLideN64's F3DEX2CBFD.
-+// Commands not listed here behave as in F3DEX2.
-+//
-+
-+#include "rt64_gbi_f3dex2cbfd.h"
-+
-+#include "hle/rt64_interpreter.h"
-+
-+#include "rt64_f3d.h"
-+#include "rt64_gbi_f3dex2.h"
-+
-+namespace RT64 {
-+    namespace GBI_F3DEX2CBFD {
-+        // The game's G_LIGHTING is kept aside: lighting is computed into the vertex
-+        // colours on the CPU (RSP::lightVerticesCBFD), so the shaders must not light
-+        // them again. Texture generation also relies on these normals, which RT64's
-+        // shaders can't see, so it's disabled for now.
-+        void geometryMode(State *state, DisplayList **dl) {
-+            RSP *rsp = state->rsp.get();
-+            const uint32_t offMask = (*dl)->p0(0, 24);
-+            const uint32_t onMask = (*dl)->w1;
-+            const uint32_t current = rsp->geometryModeStack[rsp->geometryModeStackSize - 1];
-+            const uint32_t previous = current | (rsp->cbfd.lighting ? G_LIGHTING : 0);
-+            const uint32_t requested = (previous & offMask) | onMask;
-+            rsp->cbfd.lighting = (requested & G_LIGHTING) != 0;
-+            rsp->modifyGeometryMode(0, requested & ~(G_LIGHTING | G_TEXTURE_GEN | G_TEXTURE_GEN_LINEAR));
+diff --git a/src/hle/rt64_application.cpp b/src/hle/rt64_application.cpp
+index ee8bc1f..49e6cdd 100644
+--- a/src/hle/rt64_application.cpp
++++ b/src/hle/rt64_application.cpp
+@@ -325,7 +325,12 @@ namespace RT64 {
+         // Create the swap chain with the texture count specified from the configuration.
+         RenderSwapChainDesc swapChainDesc;
+         swapChainDesc.renderWindow = appWindow->windowHandle;
++#   if defined(__ANDROID__)
++        // Android's swap chains are RGBA: BGRA isn't among their surface formats.
++        swapChainDesc.format = RenderFormat::R8G8B8A8_UNORM;
++#   else
+         swapChainDesc.format = RenderFormat::B8G8R8A8_UNORM;
++#   endif
+         swapChainDesc.textureCount = (userConfig.displayBuffering == UserConfiguration::DisplayBuffering::Triple) ? 3 : 2;
+ 
+         // Enable present wait if supported by the device. We specify a max latency of 1 as we use it to wait right before the next
+diff --git a/src/hle/rt64_application_window.cpp b/src/hle/rt64_application_window.cpp
+index 08f83e5..759bd20 100755
+--- a/src/hle/rt64_application_window.cpp
++++ b/src/hle/rt64_application_window.cpp
+@@ -11,7 +11,7 @@
+ #if defined(_WIN32)
+ #   include <Windows.h>
+ #   include <ShellScalingAPI.h>
+-#elif defined(__linux__)
++#elif defined(__linux__) && !defined(__ANDROID__)
+ #   define Status int
+ #   if !defined(RT64_SDL_WINDOW_VULKAN)
+ #      include <X11/extensions/Xrandr.h>
+@@ -104,7 +104,9 @@ namespace RT64 {
+         bounds.width = rect.right - rect.left;
+         bounds.height = rect.bottom - rect.top;
+ #   elif defined(__ANDROID__)
+-        static_assert(false && "Android unimplemented");
++        // The program embedding RT64 opens the window on Android (setup with a window).
++        assert(false && "RT64 doesn't open its own window on Android");
++        return;
+ #   elif defined(__linux__) || defined(__APPLE__)
+         if (SDL_VideoInit(nullptr) != 0) {
+             printf("Failed to init SDL2 video: %s\n", SDL_GetError());
+@@ -148,7 +150,7 @@ namespace RT64 {
+ #   elif defined(RT64_SDL_WINDOW_VULKAN)
+         windowHandle = sdlWindow;
+ #   elif defined(__ANDROID__)
+-        static_assert(false && "Android unimplemented");
++        windowHandle = wmInfo.info.android.window;
+ #   elif defined(__linux__)
+         windowHandle.display = wmInfo.info.x11.display;
+         windowHandle.window = wmInfo.info.x11.window;
+@@ -293,6 +295,15 @@ namespace RT64 {
+             return;
+         }
+ 
++        refreshRate = displayMode.refresh_rate;
++#   elif defined(__ANDROID__)
++        // The window is an ANativeWindow: ask SDL for the screen's rate.
++        SDL_DisplayMode displayMode = {};
++        if (SDL_GetCurrentDisplayMode(0, &displayMode) != 0) {
++            fprintf(stderr, "SDL_GetCurrentDisplayMode failed. Error: %s.\n", SDL_GetError());
++            return;
 +        }
 +
-+        void vertex(State *state, DisplayList **dl) {
-+            uint8_t vtxCount = (*dl)->p0(12, 8);
-+            state->rsp->setVertexCBFD((*dl)->w1, vtxCount, (*dl)->p0(1, 7) - vtxCount);
-+        }
-+
-+        void moveWord(State *state, DisplayList **dl) {
-+            switch ((*dl)->p0(16, 8)) {
-+            case G_MW_NUMLIGHT:
-+                state->rsp->cbfd.lightCount = (*dl)->w1 / 48;
-+                break;
-+            case F3DEX2CBFD_G_MW_COORD_MOD:
-+                state->rsp->setCoordModCBFD((*dl)->w0, (*dl)->w1);
-+                break;
-+            default:
-+                GBI_F3DEX2::moveWord(state, dl);
-+                break;
-+            }
-+        }
-+
-+        void moveMem(State *state, DisplayList **dl) {
-+            switch ((*dl)->p0(0, 8)) {
-+            case F3DEX2_G_MV_VIEWPORT:
-+                state->rsp->setViewport((*dl)->w1);
-+                break;
-+            case F3DEX2_G_MV_LIGHT: {
-+                const uint32_t offset = (*dl)->p0(5, 14);
-+                const uint32_t n = offset / 48;
-+                if (n < 2) {
-+                    state->rsp->setLookAt(n, (*dl)->w1);
-+                }
-+                else {
-+                    state->rsp->setLightCBFD(n - 2, (*dl)->w1);
-+                }
-+
-+                break;
-+            }
-+            case F3DEX2CBFD_G_MV_NORMALES:
-+                state->rsp->cbfd.normalBase = state->rsp->fromSegmentedMasked((*dl)->w1);
-+                break;
-+            default:
-+                break;
-+            }
-+        }
-+
-+        // The microcode reuses G_LOAD_UCODE to switch to its advanced lighting mode.
-+        void switchLightingMode(State *state, DisplayList **dl) {
-+            state->rsp->cbfd.advancedLighting = true;
-+        }
-+
-+        void tri4(State *state, DisplayList **dl) {
-+            const uint32_t w0 = (*dl)->w0;
-+            const uint32_t w1 = (*dl)->w1;
-+            auto field = [](uint32_t w, uint32_t shift, uint32_t bits) { return (w >> shift) & ((1U << bits) - 1); };
-+            const uint32_t v[12] = {
-+                field(w0, 23, 5), field(w0, 18, 5), (field(w0, 15, 3) << 2) | field(w1, 30, 2),
-+                field(w0, 10, 5), field(w0, 5, 5), field(w0, 0, 5),
-+                field(w1, 25, 5), field(w1, 20, 5), field(w1, 15, 5),
-+                field(w1, 10, 5), field(w1, 5, 5), field(w1, 0, 5),
-+            };
-+
-+            for (int t = 0; t < 4; t++) {
-+                const uint32_t a = v[t * 3 + 0], b = v[t * 3 + 1], c = v[t * 3 + 2];
-+                // Unused slots repeat an index.
-+                if ((a != b) && (b != c) && (a != c)) {
-+                    state->rsp->drawIndexedTri(a, b, c);
-+                }
-+            }
-+        }
-+
-+        void reset(State *state) {
-+            state->rsp->setClipRatioAll(2U);
-+            state->rsp->cbfd.advancedLighting = false;
-+        }
-+
-+        void setup(GBI *gbi) {
-+            GBI_F3DEX2::setup(gbi);
-+            gbi->resetFromTask = &reset;
-+            gbi->map[F3DEX2_G_GEOMETRYMODE] = &geometryMode;
-+            gbi->map[F3DEX2_G_VTX] = &vertex;
-+            gbi->map[F3DEX2_G_MOVEWORD] = &moveWord;
-+            gbi->map[F3DEX2_G_MOVEMEM] = &moveMem;
-+            gbi->map[F3DEX2_G_LOAD_UCODE] = &switchLightingMode;
-+            for (uint32_t i = 0; i < 16; i++) {
-+                gbi->map[F3DEX2CBFD_G_TRI4 + i] = &tri4;
-+            }
-+        }
-+    }
-+};
-diff --git a/src/gbi/rt64_gbi_f3dex2cbfd.h b/src/gbi/rt64_gbi_f3dex2cbfd.h
-new file mode 100644
-index 0000000..99ef5c2
---- /dev/null
-+++ b/src/gbi/rt64_gbi_f3dex2cbfd.h
-@@ -0,0 +1,20 @@
-+//
-+// RT64
-+//
-+
-+#pragma once
-+
-+#include "rt64_gbi.h"
-+
-+// Conker's Bad Fur Day's modified F3DEX2: F3DEX2 with a different lighting
-+// model (point lights, per-vertex normals held apart from the vertices, a
-+// coordinate modifier) and a four-triangle command.
-+#define F3DEX2CBFD_G_TRI4 0x10
-+#define F3DEX2CBFD_G_MV_NORMALES 14
-+#define F3DEX2CBFD_G_MW_COORD_MOD 0x10
-+
-+namespace RT64 {
-+    namespace GBI_F3DEX2CBFD {
-+        void setup(GBI *gbi);
-+    };
-+};
+         refreshRate = displayMode.refresh_rate;
+ #   elif defined(__linux__)
+         // Sourced from: https://stackoverflow.com/a/66865623
+@@ -349,6 +360,10 @@ namespace RT64 {
+         newWindowTop = rect.top;
+ #   elif defined(RT64_SDL_WINDOW_VULKAN)
+         SDL_GetWindowPosition(windowHandle, &newWindowLeft, &newWindowTop);
++#   elif defined(__ANDROID__)
++        // Android windows fill the screen and don't move.
++        newWindowLeft = windowLeft;
++        newWindowTop = windowTop;
+ #   elif defined(__linux__)
+         XWindowAttributes attributes;
+         XGetWindowAttributes(windowHandle.display, windowHandle.window, &attributes);
 diff --git a/src/hle/rt64_framebuffer_manager.cpp b/src/hle/rt64_framebuffer_manager.cpp
 index d7caa12..60112aa 100644
 --- a/src/hle/rt64_framebuffer_manager.cpp
@@ -1199,7 +1142,7 @@ index 5a331aa..3d4fca2 100644
                                  G_IM_FMT_DEPTH, f, depthFb->readHeight, readRowCount, ext.shaderLibrary);
  
 diff --git a/src/render/rt64_framebuffer_renderer.cpp b/src/render/rt64_framebuffer_renderer.cpp
-index 9fae0d4..8cac619 100644
+index 9fae0d4..2046b61 100644
 --- a/src/render/rt64_framebuffer_renderer.cpp
 +++ b/src/render/rt64_framebuffer_renderer.cpp
 @@ -7,6 +7,7 @@
@@ -1317,7 +1260,7 @@ index 9fae0d4..8cac619 100644
                          bool usesViewport = (proj.type == Projection::Type::Perspective) || (proj.type == Projection::Type::Orthographic);
                          if (usesViewport) {
 diff --git a/src/render/rt64_projection_processor.cpp b/src/render/rt64_projection_processor.cpp
-index e842dcc..c0e4b44 100644
+index e842dcc..d304ec4 100644
 --- a/src/render/rt64_projection_processor.cpp
 +++ b/src/render/rt64_projection_processor.cpp
 @@ -4,6 +4,7 @@
@@ -1379,3 +1322,60 @@ index e842dcc..c0e4b44 100644
  
                  // We only interpolate the projection if the view matrix has been interpolated.
                  const bool interpolateProjection = rigidBody->lerpTranslation || rigidBody->lerpRotation;
+diff --git a/src/render/rt64_shader_library.cpp b/src/render/rt64_shader_library.cpp
+index d1c5273..77dc074 100644
+--- a/src/render/rt64_shader_library.cpp
++++ b/src/render/rt64_shader_library.cpp
+@@ -599,7 +599,11 @@ namespace RT64 {
+             RenderGraphicsPipelineDesc pipelineDesc;
+             pipelineDesc.vertexShader = fullScreenVertexShader.get();
+             pipelineDesc.pixelShader = regularShader.get();
++#       if defined(__ANDROID__)
++            pipelineDesc.renderTargetFormat[0] = RenderFormat::R8G8B8A8_UNORM; // The swap chain's (rt64_application.cpp).
++#       else
+             pipelineDesc.renderTargetFormat[0] = RenderFormat::B8G8R8A8_UNORM; // TODO: Use whatever format the swap chain was created with.
++#       endif
+             pipelineDesc.renderTargetBlend[0] = RenderBlendDesc::Copy();
+             pipelineDesc.renderTargetCount = 1;
+             pipelineDesc.pipelineLayout = videoInterfaceNearest.pipelineLayout.get();
+diff --git a/src/tools/file_to_c/file_to_c.cmake b/src/tools/file_to_c/file_to_c.cmake
+new file mode 100644
+index 0000000..ea68014
+--- /dev/null
++++ b/src/tools/file_to_c/file_to_c.cmake
+@@ -0,0 +1,35 @@
++# file_to_c as a CMake script, for cross-compiling (the program can't run on the build
++# machine then). Same output as file_to_c.cpp:
++#   cmake -P file_to_c.cmake [input file] [array name] [output C file] [output C header]
++if (NOT CMAKE_ARGC EQUAL 7)
++    message(FATAL_ERROR "Usage: cmake -P file_to_c.cmake [input file] [array name] [output C file] [output C header]")
++endif()
++set(input_path "${CMAKE_ARGV3}")
++set(array_name "${CMAKE_ARGV4}")
++set(output_c_path "${CMAKE_ARGV5}")
++set(output_h_path "${CMAKE_ARGV6}")
++
++file(READ "${input_path}" contents HEX)
++string(LENGTH "${contents}" hex_length)
++if (hex_length EQUAL 0)
++    message(FATAL_ERROR "Failed to open file ${input_path}! (Or it's empty)")
++endif()
++math(EXPR size "${hex_length} / 2")
++string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\1," bytes "${contents}")
++
++file(WRITE "${output_c_path}"
++    "#include <stddef.h>\n"
++    "extern const char ${array_name}[${size}];\n"
++    "const char ${array_name}[${size}] = {${bytes}};\n"
++    "extern const size_t ${array_name}_size;\n"
++    "const size_t ${array_name}_size = sizeof(${array_name}) / sizeof(${array_name}[0]);\n")
++file(WRITE "${output_h_path}"
++    "#ifdef __cplusplus\n"
++    "  extern \"C\" {\n"
++    "#endif\n"
++    "#include <stddef.h>\n"
++    "extern const char ${array_name}[${size}];\n"
++    "extern const size_t ${array_name}_size;\n"
++    "#ifdef __cplusplus\n"
++    "  }\n"
++    "#endif\n")

@@ -25,3 +25,9 @@
 [submodule "conker/tools/mips_to_c"]
 	path = conker/tools/mips_to_c
 	url = https://github.com/matt-kempster/mips_to_c.git
+[submodule "tools/SDL2"]
+	path = tools/SDL2
+	url = https://github.com/libsdl-org/SDL.git
+[submodule "tools/freetype"]
+	path = tools/freetype
+	url = https://github.com/freetype/freetype.git

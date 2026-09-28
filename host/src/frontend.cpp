@@ -63,6 +63,10 @@ namespace {
         SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_PS5_RUMBLE, "1");
         SDL_SetHint(SDL_HINT_MOUSE_FOCUS_CLICKTHROUGH, "1");
         SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+#if defined(__ANDROID__)
+        // Landscape only: SDL would otherwise let a window wider than tall turn with the phone.
+        SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+#endif
         // Debugging aid: CONKER_NO_CONTROLLER=1 ignores game controllers, e.g. for test
         // runs while someone else is playing with the controller on the same machine.
         Uint32 subsystems = SDL_INIT_VIDEO;
@@ -83,7 +87,9 @@ namespace {
 
     ultramodern::renderer::WindowHandle create_window(void*) {
         uint32_t flags = SDL_WINDOW_RESIZABLE;
-#if defined(RT64_SDL_WINDOW_VULKAN)
+#if defined(RT64_SDL_WINDOW_VULKAN) || defined(__ANDROID__)
+        // On Android, without it SDL makes an EGL surface on the window, and Vulkan then
+        // can't have it (VK_ERROR_NATIVE_WINDOW_IN_USE_KHR).
         flags |= SDL_WINDOW_VULKAN;
 #elif defined(__APPLE__)
         flags |= SDL_WINDOW_METAL;

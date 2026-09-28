@@ -79,10 +79,11 @@ else()
 endif()
 
 if (ANDROID)
-    # A library for the app in android/ to load (libConkerRecomp.so); it calls main.cpp
-    # through src/android_main.cpp.
+    # A library for the app in android/ to load (libConkerRecomp.so). With RT64, SDL's
+    # SDLActivity calls main.cpp's main (SDL_main); the headless build is started through
+    # src/android_main.cpp, which also sends the output to logcat.
     add_library(ConkerRecomp SHARED src/android_main.cpp)
-    target_link_libraries(ConkerRecomp PRIVATE log)
+    target_link_libraries(ConkerRecomp PRIVATE log android)
 else()
     add_executable(ConkerRecomp)
 endif()
@@ -115,7 +116,31 @@ if (CONKER_RT64)
     # RT64 only needs zstd's library. Its programs also copy man pages with a shell
     # command that breaks on a path with an apostrophe.
     set(ZSTD_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
-    if (NOT WIN32 AND NOT APPLE)
+    if (ANDROID)
+        # SDL2 from source (tools/SDL2), as the shared library SDLActivity loads.
+        set(SDL_SHARED ON CACHE BOOL "" FORCE)
+        set(SDL_STATIC OFF CACHE BOOL "" FORCE)
+        set(SDL_TEST OFF CACHE BOOL "" FORCE)
+        add_subdirectory("${REPO_ROOT}/tools/SDL2" "${CMAKE_CURRENT_BINARY_DIR}/SDL2")
+        # Both <SDL.h> and <SDL2/SDL.h>: SDL's build copies its headers into include/SDL2.
+        set(SDL2_INCLUDE_DIRS "${REPO_ROOT}/tools/SDL2/include" "${CMAKE_CURRENT_BINARY_DIR}/SDL2/include")
+        # zstd's dictionary builder needs qsort_r, which Android lacks; RT64 doesn't use it.
+        set(ZSTD_BUILD_DICTBUILDER OFF CACHE BOOL "" FORCE)
+        set(SDL2_LIBRARIES SDL2::SDL2)
+        # FreeType from source (tools/freetype) for RmlUi, found by its find_package(Freetype).
+        foreach(option FT_DISABLE_ZLIB FT_DISABLE_BZIP2 FT_DISABLE_PNG FT_DISABLE_HARFBUZZ FT_DISABLE_BROTLI)
+            set(${option} ON CACHE BOOL "" FORCE)
+        endforeach()
+        add_subdirectory("${REPO_ROOT}/tools/freetype" "${CMAKE_CURRENT_BINARY_DIR}/freetype" EXCLUDE_FROM_ALL)
+        add_library(Freetype::Freetype ALIAS freetype)
+        set(FREETYPE_LIBRARY freetype CACHE STRING "" FORCE)
+        set(FREETYPE_INCLUDE_DIR_ft2build "${REPO_ROOT}/tools/freetype/include" CACHE PATH "" FORCE)
+        set(FREETYPE_INCLUDE_DIR_freetype2 "${REPO_ROOT}/tools/freetype/include" CACHE PATH "" FORCE)
+        # Android has no native file dialog: RT64 and RecompFrontend get this nfd instead.
+        add_library(nfd STATIC src/android/nfd_android.cpp)
+        target_include_directories(nfd PUBLIC "${RT64_DIR}/src/contrib/nativefiledialog-extended/src/include")
+        # RT64 renders with Vulkan into the SDL window's ANativeWindow (plume's Android path).
+    elseif (NOT WIN32 AND NOT APPLE)
         # On Linux, RT64 renders with Vulkan into an SDL window (as in
         # Banjo: Recompiled): the window is created with SDL_WINDOW_VULKAN.
         # On macOS it renders with Metal into the window's CAMetalLayer.
@@ -133,7 +158,7 @@ if (CONKER_RT64)
     # remappable input (recompinput). tools/RecompFrontend is an untracked checkout.
     if (WIN32)
         set(sdl2_SOURCE_DIR "${RT64_DIR}/src/contrib/mupen64plus-win32-deps/SDL2-2.26.3")
-    else()
+    elseif (NOT ANDROID)
         # The system SDL2; RecompFrontend takes its headers from SDL2_INCLUDE_DIRS.
         find_package(SDL2 REQUIRED)
     endif()
@@ -151,7 +176,19 @@ if (CONKER_RT64)
     else()
         set(DXC_ARCH arm64)
     endif()
-    if (WIN32)
+    # rt64's shader functions also run file_to_c: a CMake script when cross-compiling
+    # (as rt64's CMakeLists.txt sets it), the program otherwise.
+    if (CMAKE_CROSSCOMPILING)
+        set(FILE_TO_C "${CMAKE_COMMAND}" -P "${RT64_DIR}/src/tools/file_to_c/file_to_c.cmake")
+        set(FILE_TO_C_DEPENDS "${RT64_DIR}/src/tools/file_to_c/file_to_c.cmake")
+    else()
+        set(FILE_TO_C file_to_c)
+        set(FILE_TO_C_DEPENDS file_to_c)
+    endif()
+    if (CMAKE_CROSSCOMPILING AND CMAKE_HOST_WIN32)
+        # Android from Windows: DXC runs on the build machine.
+        set(DXC "${RT64_DIR}/src/contrib/dxc/bin/x64/dxc.exe")
+    elseif (WIN32)
         set(DXC "${RT64_DIR}/src/contrib/dxc/bin/x64/dxc.exe")
     elseif (APPLE)
         # recompui's shaders also go through spirv_cross_msl (rt64's target) and xcrun metal.

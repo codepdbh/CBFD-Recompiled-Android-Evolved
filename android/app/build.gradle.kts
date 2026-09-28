@@ -19,8 +19,18 @@ android {
         externalNativeBuild {
             cmake {
                 // The recompiled game is far too slow unoptimised, even in debug builds.
-                arguments += listOf("-DCMAKE_BUILD_TYPE=RelWithDebInfo", "-DCONKER_RT64=OFF")
+                arguments += listOf("-DCMAKE_BUILD_TYPE=RelWithDebInfo")
             }
+        }
+    }
+
+    sourceSets {
+        getByName("main") {
+            // SDL's Java side (SDLActivity and friends).
+            java.srcDir("../../tools/SDL2/android-project/app/src/main/java")
+            // The launcher's fonts, icons and style sheet (host/assets), copied to the
+            // game's folder by MainActivity.
+            assets.srcDir("../../host/assets")
         }
     }
 

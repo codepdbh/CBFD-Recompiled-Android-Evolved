@@ -139,7 +139,7 @@ python3 -c "import sys; sys.path.insert(0, 'recomp'); import unpack_rom; unpack_
 # ---------------------------------------------------------------- tools
 step "Getting the submodules"
 # A pull can move a patched tool to another commit, which the patch would block.
-for tool in tools/N64Recomp tools/N64ModernRuntime tools/rt64; do
+for tool in tools/N64Recomp tools/N64ModernRuntime tools/rt64 tools/RecompFrontend; do
     if [ -e "$tool/.git" ]; then
         want=$(git ls-tree HEAD "$tool" | awk '{print $3}')
         if [ "$want" != "$(git -C "$tool" rev-parse HEAD)" ]; then
@@ -182,6 +182,8 @@ step "Patching the tools"
 apply_patch tools/N64Recomp recomp/n64recomp.patch
 apply_patch tools/N64ModernRuntime recomp/n64modernruntime.patch
 apply_patch tools/rt64 recomp/rt64.patch
+# RecompFrontend on Android (SDL's ANativeWindow for RT64, RGBA swap chain).
+apply_patch tools/RecompFrontend recomp/recompfrontend.patch
 # RmlUi's fix for GCC 15 and later (RmlUi #766), which isn't in the RmlUi that RecompFrontend
 # uses: its robin_hood.h uses uint64_t without including <cstdint>. Unneeded, and skipped as
 # already applied, once RecompFrontend uses RmlUi 6.2 or later.

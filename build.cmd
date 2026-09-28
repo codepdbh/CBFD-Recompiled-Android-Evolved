@@ -61,6 +61,7 @@ rem A pull can move a patched tool to another commit, which its patch would bloc
 call :reset_if_moved tools/N64Recomp
 call :reset_if_moved tools/N64ModernRuntime
 call :reset_if_moved tools/rt64
+call :reset_if_moved tools/RecompFrontend
 call :reset_rmlui_if_moved
 git submodule update --init --recursive || exit /b 1
 
@@ -69,6 +70,8 @@ echo ==^> Patching the tools
 call :apply_patch tools/N64Recomp recomp/n64recomp.patch || exit /b 1
 call :apply_patch tools/N64ModernRuntime recomp/n64modernruntime.patch || exit /b 1
 call :apply_patch tools/rt64 recomp/rt64.patch || exit /b 1
+rem RecompFrontend on Android (SDL's ANativeWindow for RT64, RGBA swap chain).
+call :apply_patch tools/RecompFrontend recomp/recompfrontend.patch || exit /b 1
 rem RmlUi's fix for GCC 15 and later (see build.sh). MSVC doesn't need it, but the patched
 rem file is the same on every system.
 call :apply_patch tools/RecompFrontend/recompui/lib/RmlUi recomp/rmlui.patch || exit /b 1
