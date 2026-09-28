@@ -2,6 +2,11 @@
 
 # Conker's Bad Fur Day: Recompiled
 
+> **Android Evolved:** this fork adds a native Android port (arm64, Vulkan) with
+> touch controls and mod support. Installation guide (Spanish):
+> [android/INSTALL.md](android/INSTALL.md). APKs are on the
+> [Releases page](https://github.com/codepdbh/CBFD-Recompiled-Android-Evolved/releases).
+
 A native PC port of **Conker's Bad Fur Day** (N64, US version). It's built by
 statically recompiling the game with [N64Recomp](https://github.com/N64Recomp/N64Recomp),
 starting from the [Conker decompilation](https://github.com/mkst/conker). It runs on

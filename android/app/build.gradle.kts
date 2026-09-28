@@ -11,9 +11,11 @@ android {
         applicationId = "com.codepdbh.cbfdrecomp"
         minSdk = 30
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
         ndk {
+            // 64-bit only: the runtime reserves 4 GB of address space for the N64's memory, and
+            // mods patch arm64 (or x86-64) code. A 32-bit (armeabi-v7a) build can't work.
             abiFilters += "arm64-v8a"
         }
         externalNativeBuild {

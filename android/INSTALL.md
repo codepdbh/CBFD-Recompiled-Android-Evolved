@@ -1,0 +1,130 @@
+# Conker's Bad Fur Day: Recompiled — Android Evolved
+
+Guía de instalación para Android.
+
+> **El juego no viene incluido.** Necesitas tu propia copia de la ROM de
+> Conker's Bad Fur Day **de Estados Unidos (USA)** para N64.
+
+## Requisitos
+
+- **Android 11 o superior.**
+- **Procesador de 64 bits (ARM64 / arm64-v8a).** Casi todos los teléfonos de los
+  últimos años lo son. **No funciona en teléfonos de 32 bits (ARMv7)**: el juego
+  necesita más memoria de la que un proceso de 32 bits puede usar.
+- **GPU con Vulkan 1.1.**
+- Unos **300 MB libres**: la ROM ocupa 64 MB y el juego guarda una copia verificada.
+- Recomendado: un procesador de gama alta reciente (por ejemplo, Snapdragon 8 Gen 2
+  o superior). Se probó en un Galaxy S25 Ultra (Snapdragon 8 Elite).
+  Los teléfonos con **MediaTek Helio/Dimensity (GPU Mali)** deberían funcionar,
+  pero todavía no se han probado.
+
+## Qué descargar
+
+De la página de [Releases](https://github.com/codepdbh/CBFD-Recompiled-Android-Evolved/releases):
+
+| Archivo | Para qué |
+|---|---|
+| `ConkerRecompiled-Android-vX.Y.Z-arm64-v8a.apk` | El juego. **Obligatorio.** |
+| `ConkerRecompiled-Mods-vX.Y.Z.zip` | Mods opcionales: Skip Intro, Skip Any Cutscene y Cheats. |
+
+## Instalación
+
+1. **Descarga la APK** en el teléfono.
+2. **Ábrela e instálala.** Si Android lo pide, permite instalar apps desde esa
+   fuente: *Ajustes → Aplicaciones → Acceso especial → Instalar apps desconocidas*,
+   y activa el navegador o el gestor de archivos que usaste.
+3. **Abre "Conker Recompiled".** La primera vez te pide **"Permitir acceso a todos
+   los archivos"**: actívalo. El juego lo necesita para guardar todo en la
+   carpeta `ConkerRecompiled` de tu memoria interna.
+4. En la pantalla de inicio, toca **Elegir ROM** y selecciona tu ROM
+   (`.z64`, `.n64` o `.v64`). Se copia sola a la carpeta del juego.
+5. Toca **▶ JUGAR**.
+
+La primera vez que se ve cada efecto o escena puede haber una pausa breve mientras
+se preparan los gráficos. Es normal y no vuelve a pasar en esa escena.
+
+## La ROM
+
+- Tiene que ser **Conker's Bad Fur Day (USA)**. La versión europea (PAL) y otras
+  regiones no funcionan.
+- Los parches de ROM que solo cambian gráficos, audio o texto (por ejemplo, la
+  versión sin censura) funcionan en la versión de PC; en Android todavía no se han
+  probado.
+- No hace falta copiar la ROM a mano: **Elegir ROM** lo hace por ti. Si prefieres
+  copiarla tú, ponla como `ConkerRecompiled/rom.z64` y abre el juego.
+
+## Qué hay en la carpeta del juego
+
+Todo queda en **`Memoria interna/ConkerRecompiled/`**
+(`/storage/emulated/0/ConkerRecompiled/`):
+
+```
+ConkerRecompiled/
+├── rom.z64                  ← la ROM que elegiste (el juego la verifica y guarda una copia)
+├── conker.n64.us.1.0.z64    ← la copia verificada que usa el juego
+├── mods/                    ← aquí van los mods (.nrm)
+├── saves/                   ← tus partidas guardadas
+│   └── copias/              ← las "copias de partida" del menú de pausa
+├── general.json, graphics.json, sound.json, controls.json   ← ajustes
+├── touch_layout.json        ← posición y tamaño de los botones táctiles
+└── assets/, .rt64/, ...     ← archivos internos del juego (no los toques)
+```
+
+**Para hacer una copia de seguridad de tus partidas,** copia la carpeta
+`ConkerRecompiled/saves` a otro lugar.
+
+## Mods (opcional)
+
+Los mods son archivos `.nrm`. Dos formas de instalarlos:
+
+- **Desde el juego (recomendado):** en la pantalla de inicio toca **Mods →
+  Añadir .nrm** y selecciona los archivos. Se activan solos.
+- **A mano:** descomprime `ConkerRecompiled-Mods-vX.Y.Z.zip` y copia los `.nrm` a
+  **`ConkerRecompiled/mods/`**. Luego actívalos en **Mods** en la pantalla de inicio.
+
+Mods incluidos:
+
+- **Skip Intro:** empieza directo en el menú, sin los avisos, logos ni la
+  escena de la motosierra.
+- **Skip Any Cutscene:** L salta cualquier cinemática, aunque no la hayas visto antes.
+- **Cheats:** vida infinita, vidas infinitas y dinero al máximo. Cada uno se
+  activa en sus opciones: menú de pausa → Menú avanzado → Mods → Configure.
+
+## Controles
+
+- **Botones táctiles:** aparecen solos. Toca **✎** (arriba al centro) para moverlos
+  y cambiarles el tamaño. **💾** abre las copias de partida y **☰** el menú de pausa.
+- **Mandos Bluetooth o USB** (Xbox, PlayStation, 8BitDo…): se reconocen solos y
+  los botones táctiles se ocultan mientras hay uno conectado.
+- **Teclado:** funciona con los controles de PC (WASD para moverte, Espacio = A…).
+- Para **remapear** un mando o el teclado: menú de pausa → **Menú avanzado**.
+- **Apuntar moviendo el teléfono:** mantén R para mirar y gira el teléfono.
+  Se ajusta en **Ajustes**.
+
+## Menú de pausa (☰)
+
+Continuar, copias de partida, mover los botones, menú avanzado y salir al inicio,
+más ajustes rápidos: calidad gráfica, cuadros por segundo, volumen, transparencia
+de los botones, giroscopio y vibración.
+
+**Copias de partida:** guardan tu **último guardado del juego** (el del último
+checkpoint) en uno de 3 espacios, y al cargar una el juego se reinicia en ella.
+No son estados instantáneos como en un emulador: este port no se puede congelar
+en un segundo cualquiera.
+
+## Si algo va mal
+
+- **Va lento o se calienta:** en **Ajustes** elige calidad **Fluido** y
+  **30 o 60 cuadros por segundo**.
+- **"Error de la GPU":** el juego ofrece reiniciar desde tu último guardado.
+  Si pasa seguido, baja la calidad gráfica.
+- **Grabar la pantalla:** funciona en teléfonos que permiten a los juegos usar la
+  GPU con prioridad alta, como los Snapdragon recientes. En otros, grabar puede
+  causar el "Error de la GPU" de arriba.
+- **No encuentra la ROM:** comprueba que sea la versión **USA** y vuelve a
+  elegirla con **Elegir ROM**.
+
+## Desinstalar
+
+Al desinstalar la app, la carpeta `ConkerRecompiled` **no se borra**: tus partidas
+y ajustes siguen ahí. Bórrala a mano si ya no la quieres.
