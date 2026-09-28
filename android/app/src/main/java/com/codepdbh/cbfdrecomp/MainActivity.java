@@ -68,6 +68,8 @@ public class MainActivity extends Activity {
         play.setOnClickListener(v -> startGame());
         romButton.setOnClickListener(v -> pickRom());
         modsButton.setOnClickListener(v -> showMods());
+        findViewById(R.id.settings).setOnClickListener(v ->
+            startActivity(new Intent(this, SettingsActivity.class)));
     }
 
     @Override
@@ -132,6 +134,7 @@ public class MainActivity extends Activity {
      */
     private void prepareFolder(File folder) throws IOException {
         new File(folder, "mods").mkdirs();
+        SettingsActivity.writeDefaults();
         File portable = new File(folder, "portable.txt");
         if (!portable.exists() && !portable.createNewFile()) {
             throw new IOException("can't create " + portable);

@@ -77,6 +77,20 @@
                 android:textSize="16sp" />
 
             <Button
+                android:id="@+id/settings"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="0dp"
+                android:layout_height="52dp"
+                android:layout_marginStart="6dp"
+                android:layout_marginEnd="6dp"
+                android:layout_weight="1"
+                android:background="@drawable/btn_secondary"
+                android:text="Ajustes"
+                android:textAllCaps="false"
+                android:textColor="#FFFFFF"
+                android:textSize="16sp" />
+
+            <Button
                 android:id="@+id/mods"
                 style="?android:attr/borderlessButtonStyle"
                 android:layout_width="0dp"
@@ -95,7 +109,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="14dp"
-            android:text="En el juego: ☰ abre los ajustes y ✎ mueve y cambia el tamaño de los botones."
+            android:text="En el juego: ✎ mueve y cambia el tamaño de los botones, y ☰ abre el menú completo."
             android:textColor="#9A8A7A"
             android:textSize="12sp" />
     </LinearLayout>

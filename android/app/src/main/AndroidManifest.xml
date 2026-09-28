@@ -31,6 +31,11 @@
             </intent-filter>
         </activity>
         <activity
+            android:name=".SettingsActivity"
+            android:exported="false"
+            android:screenOrientation="sensorLandscape"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen" />
+        <activity
             android:name=".GameActivity"
             android:exported="false"
             android:process=":game"
