@@ -107,16 +107,21 @@ extern "C" void conker_widen_sprite_cull_right(uint8_t* rdram, recomp_context* c
     ctx->f10.fl += sprite_cull_margin(rdram);
 }
 
+// TEMP-DEBUG: render_fixes.cpp's glow log.
+extern "C" void conker_light_glow_log(const char* format, ...);
+
 // Light glows: func_151408A4 keeps a glow only while its light's projected point
 // (func_15144CEC) is inside the same camera bounds, so in widescreen glows vanished
 // toward the left and right edges. The glow is a 3D billboard, which RT64 draws
 // anywhere in the widened view; only this check is 4:3. At 0x15140988 $f10 holds the
 // left bound (camera + 0x2C), at 0x151409A0 $f4 the right one (camera + 0x30).
 extern "C" void conker_widen_light_glow_left(uint8_t* rdram, recomp_context* ctx) {
+    conker_light_glow_log("left:  f8 %.1f f10 %.1f\n", ctx->f8.fl, ctx->f10.fl);
     ctx->f10.fl -= sprite_cull_margin(rdram);
 }
 
 extern "C" void conker_widen_light_glow_right(uint8_t* rdram, recomp_context* ctx) {
+    conker_light_glow_log("right: f4 %.1f f8 %.1f\n", ctx->f4.fl, ctx->f8.fl);
     ctx->f4.fl += sprite_cull_margin(rdram);
 }
 
