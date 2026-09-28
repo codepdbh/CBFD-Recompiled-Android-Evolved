@@ -37,7 +37,7 @@ index a4cf7e8..8bb9ad2 100644
      };
      struct Version {
 diff --git a/librecomp/src/mods.cpp b/librecomp/src/mods.cpp
-index 0f7de83..42c9057 100644
+index 0f7de83..58c897e 100644
 --- a/librecomp/src/mods.cpp
 +++ b/librecomp/src/mods.cpp
 @@ -149,9 +149,11 @@ private:
@@ -53,20 +53,60 @@ index 0f7de83..42c9057 100644
          &old_flags_dword);
      *old_flags = old_flags_dword;
      (void)result;
-@@ -233,7 +235,13 @@ void unprotect(void* target_func, uint64_t* old_flags) {
-     int page_size = getpagesize();
-     page_start = (page_start / page_size) * page_size;
+@@ -227,25 +229,43 @@ private:
+     uint32_t api_version;
+ };
  
++// The pages holding the bytes a patch writes (patch_func writes at most 16). A function
++// can start just before a page boundary, and then the patch reaches into the next page.
++static void patch_pages(void* target_func, uintptr_t* start, size_t* length) {
++    constexpr size_t patch_size = 16;
++    uintptr_t page_size = (uintptr_t)getpagesize();
++    uintptr_t first = (uintptr_t)target_func / page_size * page_size;
++    uintptr_t last = ((uintptr_t)target_func + patch_size - 1) / page_size * page_size;
++    *start = first;
++    *length = (size_t)(last - first + page_size);
++}
++
+ void unprotect(void* target_func, uint64_t* old_flags) {
+-    // Align the address to a page boundary.
+-    uintptr_t page_start = (uintptr_t)target_func;
+-    int page_size = getpagesize();
+-    page_start = (page_start / page_size) * page_size;
++    uintptr_t page_start;
++    size_t length;
++    patch_pages(target_func, &page_start, &length);
+ 
+-    int result = mprotect((void*)page_start, page_size, PROT_READ | PROT_WRITE);
 +#if defined(__APPLE__)
 +    // Apple Silicon doesn't allow pages both writable and executable.
-     int result = mprotect((void*)page_start, page_size, PROT_READ | PROT_WRITE);
++    int result = mprotect((void*)page_start, length, PROT_READ | PROT_WRITE);
 +#else
 +    // Keep the page executable while it's patched: other threads may be running code on it.
-+    int result = mprotect((void*)page_start, page_size, PROT_READ | PROT_WRITE | PROT_EXEC);
++    int result = mprotect((void*)page_start, length, PROT_READ | PROT_WRITE | PROT_EXEC);
 +#endif
      *old_flags = 0;
      (void)result;
  }
+ 
+ void protect(void* target_func, uint64_t old_flags) {
+-    // Align the address to a page boundary.
+-    uintptr_t page_start = (uintptr_t)target_func;
+-    int page_size = getpagesize();
+-    page_start = (page_start / page_size) * page_size;
++    uintptr_t page_start;
++    size_t length;
++    patch_pages(target_func, &page_start, &length);
+ 
+-    int result = mprotect((void*)page_start, page_size, PROT_READ | PROT_EXEC);
++    int result = mprotect((void*)page_start, length, PROT_READ | PROT_EXEC);
+     (void)result;
++    // ARM's instruction cache isn't coherent with its data cache: without this, a core
++    // can keep running the bytes the patch replaced.
++    __builtin___clear_cache((char*)target_func, (char*)target_func + 16);
+ }
+ #endif
+ 
 diff --git a/librecomp/src/pi.cpp b/librecomp/src/pi.cpp
 index 43509ba..39b4a99 100644
 --- a/librecomp/src/pi.cpp

@@ -78,7 +78,15 @@ else()
     )
 endif()
 
-add_executable(ConkerRecomp
+if (ANDROID)
+    # A library for the app in android/ to load (libConkerRecomp.so); it calls main.cpp
+    # through src/android_main.cpp.
+    add_library(ConkerRecomp SHARED src/android_main.cpp)
+    target_link_libraries(ConkerRecomp PRIVATE log)
+else()
+    add_executable(ConkerRecomp)
+endif()
+target_sources(ConkerRecomp PRIVATE
     src/main.cpp
     src/null_renderer.cpp
     src/overlays.cpp

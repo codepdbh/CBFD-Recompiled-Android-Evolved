@@ -4,7 +4,7 @@
 // remappable keyboard/controller input (frontend.cpp) and plays sound
 // (audio_output.cpp); otherwise, or with --headless, it runs with a null renderer,
 // no input and no sound output.
-// Usage: ConkerRecomp [--rom <baserom.us.z64>] [--seconds N] [--headless] [--window WxH]
+// Usage: ConkerRecomp [--rom <baserom.us.z64>] [--seconds N] [--headless] [--window WxH] [--data DIR]
 //   --rom PATH   the US ROM (a bare path works too, e.g. a ROM dropped onto the exe);
 //                only needed once, it is then kept with the game's data. The window
 //                build can also load it from the launcher.
@@ -12,6 +12,8 @@
 //   --headless   null renderer, no window, input or sound
 //   --window WxH open the window at this size, e.g. 2520x1080 to try a 21:9 screen
 //                (the window mode, windowed or fullscreen, is still the setting's)
+//   --data DIR   the headless build's data folder (saves, mods), instead of conker_data/
+//                next to the executable: an Android app has no folder of its own there
 
 #include <atomic>
 #include <chrono>
@@ -393,11 +395,17 @@ namespace {
     }
 }
 
+#if defined(__ANDROID__) && !defined(CONKER_RT64)
+// The headless Android build is a library, started by its app (android_main.cpp).
+#define main conker_main
+#endif
+
 int main(int argc, char** argv) {
     // Unbuffered, so diagnostics (e.g. RT64's microcode hashes) survive a crash.
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     install_crash_handler();
     std::filesystem::path rom_path;
+    std::filesystem::path data_dir;
     int seconds = 0;
 #if defined(CONKER_RT64)
     headless = false;
@@ -408,6 +416,9 @@ int main(int argc, char** argv) {
         }
         else if (std::strcmp(argv[i], "--seconds") == 0 && i + 1 < argc) {
             seconds = std::atoi(argv[++i]);
+        }
+        else if (std::strcmp(argv[i], "--data") == 0 && i + 1 < argc) {
+            data_dir = argv[++i];
         }
         else if (std::strcmp(argv[i], "--headless") == 0) {
             headless = true;
@@ -426,7 +437,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    std::filesystem::path old_data_dir = exe_directory(argv[0]) / "conker_data";
+    std::filesystem::path old_data_dir = data_dir.empty() ? exe_directory(argv[0]) / "conker_data" : data_dir;
 #if defined(CONKER_RT64)
     if (!headless) {
         // NFD_Init() is called once SDL is up (frontend.cpp's create_gfx).
