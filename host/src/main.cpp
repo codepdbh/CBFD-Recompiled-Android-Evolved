@@ -39,7 +39,9 @@
 // The game's RDRAM, for reporting fault addresses as N64 addresses.
 static uint8_t* crash_rdram = nullptr;
 
-#if defined(__linux__) || defined(__APPLE__)
+// Android has no execinfo.h before API 33, and debuggerd already logs a symbolised
+// backtrace for a crash (logcat and tombstones).
+#if (defined(__linux__) && !defined(__ANDROID__)) || defined(__APPLE__)
 #include <csignal>
 #include <execinfo.h>
 #include <unistd.h>

@@ -1,7 +1,7 @@
 // Rendering fixes for things the game did that RT64 draws differently, called from hooks in
 // conker.toml.
 
-#include <SDL.h>
+#include <cstdlib>
 
 // Light glows (such as the two lights over the Feral Reserve's doors).
 //
@@ -40,7 +40,7 @@ extern "C" void conker_light_glow_depth(uint8_t* rdram, recomp_context* ctx) {
 // the mouse camera in a wall), the last frame's picture repeated. Clear every frame.
 extern "C" void conker_frame_clear(uint8_t* rdram, recomp_context* ctx) {
     // TEMP-DEBUG: CONKER_NO_FRAME_CLEAR leaves the game's own choice, to compare.
-    static const bool disabled = SDL_getenv("CONKER_NO_FRAME_CLEAR") != nullptr;
+    static const bool disabled = std::getenv("CONKER_NO_FRAME_CLEAR") != nullptr;
     if (!disabled) {
         ctx->r24 = 1;
     }
@@ -52,14 +52,14 @@ extern "C" void conker_frame_clear(uint8_t* rdram, recomp_context* ctx) {
 // off, to find which one does it.
 // func_1510B9D0 at 0x1510BE18: $t2 (camera +0x84 & 8) decides whether func_1512E5F0 samples.
 extern "C" void conker_depth_copy_camera(uint8_t* rdram, recomp_context* ctx) {
-    static const bool skip = SDL_getenv("CONKER_SKIP_DEPTH_CAMERA") != nullptr;
+    static const bool skip = std::getenv("CONKER_SKIP_DEPTH_CAMERA") != nullptr;
     if (skip) {
         ctx->r10 = 0;
     }
 }
 // func_151742EC at 0x1517432C: $t6 (its camera argument) nonzero returns before any copy.
 extern "C" void conker_depth_copy_probes(uint8_t* rdram, recomp_context* ctx) {
-    static const bool skip = SDL_getenv("CONKER_SKIP_DEPTH_PROBES") != nullptr;
+    static const bool skip = std::getenv("CONKER_SKIP_DEPTH_PROBES") != nullptr;
     if (skip) {
         ctx->r14 = 1;
     }

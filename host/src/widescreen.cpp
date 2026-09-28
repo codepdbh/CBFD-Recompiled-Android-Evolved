@@ -13,13 +13,19 @@
 #include <cstdint>
 #include <cstring>
 
+#include <cstdlib>
+
+#if defined(CONKER_RT64)
 #include <SDL.h>
+#endif
 
 #include "recomp.h"
 #include "ultramodern/config.hpp"
 
 // The game window (frontend.cpp).
+#if defined(CONKER_RT64)
 extern SDL_Window* window;
+#endif
 
 namespace {
     // RT64's extended GBI (tools/rt64/include/rt64_extended_gbi.h) for F3DEX2,
@@ -54,6 +60,10 @@ namespace {
     // How much wider than the game's 4:3 the window shows: RT64 widens the 3D
     // view to the window's aspect ratio unless the aspect ratio is set to Original.
     float widescreen_ratio() {
+#if !defined(CONKER_RT64)
+        // No window without RT64 (the headless build): the game's own 4:3.
+        return 1.0f;
+#else
         if (ultramodern::renderer::get_graphics_config().ar_option == ultramodern::renderer::AspectRatio::Original || window == nullptr) {
             return 1.0f;
         }
@@ -63,13 +73,14 @@ namespace {
             return 1.0f;
         }
         return std::max(1.0f, (float)width / (float)height / (4.0f / 3.0f));
+#endif
     }
 
     // TEMP-DEBUG: CONKER_CULL_EXTRA widens the frustum and cull scale this much more than
     // the window, to tell whether a missing piece is theirs.
     float cull_extra() {
         static const float extra = [] {
-            const char* value = SDL_getenv("CONKER_CULL_EXTRA");
+            const char* value = std::getenv("CONKER_CULL_EXTRA");
             return value != nullptr ? std::max(1.0f, (float)std::atof(value)) : 1.0f;
         }();
         return extra;
@@ -77,7 +88,7 @@ namespace {
 
     // TEMP-DEBUG: CONKER_NO_CULL_WIDEN leaves the frustum and cull scale at 4:3.
     bool no_cull_widen() {
-        static const bool off = SDL_getenv("CONKER_NO_CULL_WIDEN") != nullptr;
+        static const bool off = std::getenv("CONKER_NO_CULL_WIDEN") != nullptr;
         return off;
     }
 

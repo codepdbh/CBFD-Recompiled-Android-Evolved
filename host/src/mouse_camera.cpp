@@ -33,10 +33,12 @@
 #include <cstdint>
 #include <cstring>
 
-#include <SDL.h>
-
 #include "recomp.h"
+
+#if defined(CONKER_RT64)
+#include <SDL.h>
 #include "recompinput/input_state.h"
+#endif
 
 namespace {
     // Degrees per pixel of mouse movement at 100% sensitivity.
@@ -63,12 +65,14 @@ namespace {
     // Scroll wheel notches since the view last read them (SDL event watch: the
     // frontend's own event loop consumes the events).
     std::atomic<int> wheel_notches = 0;
+#if defined(CONKER_RT64)
     int SDLCALL watch_wheel(void*, SDL_Event* event) {
         if (event->type == SDL_MOUSEWHEEL) {
             wheel_notches.fetch_add(event->wheel.direction == SDL_MOUSEWHEEL_FLIPPED ? -event->wheel.y : event->wheel.y);
         }
         return 1;
     }
+#endif
 
     struct Orbit {
         bool engaged = false;
@@ -136,7 +140,9 @@ extern "C" void conker_mouse_camera_collide(uint8_t* rdram, recomp_context* ctx)
     float mouse_x = 0.0f, mouse_y = 0.0f;
     int notches = 0;
     if (!orbit.turned) {
+#if defined(CONKER_RT64)
         recompinput::get_mouse_deltas(&mouse_x, &mouse_y);
+#endif
         notches = wheel_notches.exchange(0);
         orbit.turned = true;
     }
@@ -228,6 +234,8 @@ extern "C" void conker_mouse_camera(uint8_t* rdram, recomp_context* ctx) {
 }
 
 // frontend.cpp, once SDL is up: listen for the scroll wheel.
+#if defined(CONKER_RT64)
 void conker_mouse_camera_init() {
     SDL_AddEventWatch(watch_wheel, nullptr);
 }
+#endif

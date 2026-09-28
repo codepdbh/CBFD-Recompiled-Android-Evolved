@@ -148,8 +148,8 @@ void conker::look_aim::add_options(recomp::config::Config& config) {
 }
 #endif
 
-void conker::look_aim::on_input_poll() {
 #if defined(CONKER_RT64)
+void conker::look_aim::on_input_poll() {
     Movement m;
     recompinput::get_mouse_deltas(&m.mouse_x, &m.mouse_y);
     recompinput::get_gyro_deltas(0, &m.gyro_x, &m.gyro_y);
@@ -158,8 +158,8 @@ void conker::look_aim::on_input_poll() {
     while (queue.size() > 2) {
         queue.pop_front();
     }
-#endif
 }
+#endif
 
 #if defined(CONKER_RT64)
 namespace {

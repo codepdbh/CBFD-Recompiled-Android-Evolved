@@ -11,6 +11,7 @@
 /conker_data/
 /host/build-win/
 /host/build-linux/
+/host/build-android*/
 /host/build-win-log.txt
 __pycache__/
 /tools/BanjoRecomp/
