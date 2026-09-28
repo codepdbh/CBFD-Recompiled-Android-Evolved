@@ -223,6 +223,17 @@ There's no margin. The glow itself is drawn as a 3D billboard (matrices through
 margin), wired in conker.toml at 0x15140988 and 0x151409A0. Branch
 `claude/project-thread-rbl6nv`.
 
+**Edge fix confirmed by the log (2026-09-28):** $f8 is the light's x, $f10 = 2 and $f4 = 290
+(the 4:3 bounds). The user confirmed that glows now show past the 4:3 edges.
+
+**Still open: in widescreen the door glows vanish inside the 4:3 area (straight on).** Read
+from the user's RecompiledFuncs (funcs_81.c): after the bounds, func_151408A4 only checks
+facing (light dir · camera offset), distance, and, only when flag 0x10 of +0x58 is set, the
+depth sample. The door lights don't have 0x10 (the log never reached 0x15140DB4). Nothing
+after the bounds depends on screen x, so the hiding is RT64's (most likely the glow failing
+depth against the level inside 4:3, since the light sits 3 to 11 units in front of the wall).
+Asked the user to test with the aspect ratio set to Original, and with `CONKER_SKIP_DEPTH_CAMERA=1`.
+
 **Fix plan (as done):**
 - Add hooks before the two x compares: 0x15140988 (`c.lt.s $f8, $f10`, where `$f10` = left) and
   0x151409A0 (`c.lt.s $f4, $f8`, where `$f4` = right).
