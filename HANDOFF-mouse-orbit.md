@@ -218,7 +218,12 @@ right edges in widescreen.
 There's no margin. The glow itself is drawn as a 3D billboard (matrices through
 `func_151D5D60`), so widescreen draws it fine anywhere; only this check is 4:3.
 
-**Fix plan:**
+**Fix (written 2026-09-28, cloud session, not built or tried in game):** hooks
+`conker_widen_light_glow_left/right` in `widescreen.cpp` (beside the sprite cull, same
+margin), wired in conker.toml at 0x15140988 and 0x151409A0. Branch
+`claude/project-thread-rbl6nv`.
+
+**Fix plan (as done):**
 - Add hooks before the two x compares: 0x15140988 (`c.lt.s $f8, $f10`, where `$f10` = left) and
   0x151409A0 (`c.lt.s $f4, $f8`, where `$f4` = right).
 - Widen `$f10` by −margin and `$f4` by +margin. Use the same margin as the sprite cull in
