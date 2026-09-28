@@ -92,7 +92,7 @@ final class PauseMenu {
         }));
         actions.addView(action("⏏   Salir al inicio", false, v -> {
             close();
-            activity.finish();
+            activity.exitToStart();
         }));
         root.addView(actions, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
 

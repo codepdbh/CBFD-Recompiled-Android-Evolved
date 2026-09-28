@@ -154,6 +154,11 @@ public class GameActivity extends SDLActivity {
      * RESTART_ONLY). The game's process just ends: waiting for the game to wind down hangs once
      * the renderer has lost the GPU. Its save is already written (librecomp writes it at once).
      */
+    /** Back to the start screen: the game's process ends at once (see restartWith). */
+    void exitToStart() {
+        restartWith(0);
+    }
+
     private void restartWith(int slot) {
         Intent intent = new Intent(this, MainActivity.class);
         if (slot != 0) {

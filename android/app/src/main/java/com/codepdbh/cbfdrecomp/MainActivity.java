@@ -555,7 +555,30 @@ public class MainActivity extends Activity {
             pickRom();
             return;
         }
+        // A game left from before (one that didn't wind down, such as after Back) would be
+        // reused, and hang: the game only starts once per process.
+        endGameProcess();
         startActivity(new Intent(this, GameActivity.class));
+    }
+
+    private void endGameProcess() {
+        android.app.ActivityManager manager = (android.app.ActivityManager) getSystemService(ACTIVITY_SERVICE);
+        List<android.app.ActivityManager.RunningAppProcessInfo> processes = manager.getRunningAppProcesses();
+        if (processes == null) {
+            return;
+        }
+        String gameProcess = getPackageName() + ":game";
+        for (android.app.ActivityManager.RunningAppProcessInfo process : processes) {
+            if (gameProcess.equals(process.processName)) {
+                android.os.Process.killProcess(process.pid);
+                // Give the system a moment to notice it's gone before starting a new one.
+                try {
+                    Thread.sleep(300);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        }
     }
 
     // Helpers.
