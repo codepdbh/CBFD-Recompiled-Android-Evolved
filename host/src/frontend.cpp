@@ -2,6 +2,8 @@
 // (recompui) and remappable keyboard/controller input (recompinput), on an SDL
 // window rendered by RT64 through recompui's renderer.
 
+#include <algorithm>
+#include <array>
 #include <cstdio>
 #include <fstream>
 #include <mutex>
@@ -225,8 +227,212 @@ void conker::frontend::on_vi() {
     recompinput::update_rumble();
 }
 
+// Controller ports. recompinput's single-player mode reports all four ports as plugged
+// in and gives every port the merged input of every device, so on the multiplayer
+// screen one Start press joined players 2-4 as well. Instead, each controller gets its
+// own port, in the order the controllers first press a button (Windows lists them in
+// its own order, not the order they were turned on): the first to press one is player
+// 1, with the keyboard, the next player 2, and so on. A controller that disconnects
+// gives up its port, and the ones after it move up. As many ports as there are
+// controllers report as plugged in (at least one), so the game sees player 2's port
+// from the start; it gets that controller's input once it presses a button. Every
+// controller uses the single-player controller bindings.
+namespace {
+    constexpr int max_ports = 4;
+
+    std::mutex port_mutex;
+    // The controllers holding ports 1-4, in the order they first pressed a button.
+    std::vector<SDL_JoystickID> port_order;
+
+    bool controller_any_button(SDL_GameController* controller) {
+        for (int b = 0; b < SDL_CONTROLLER_BUTTON_MAX; b++) {
+            if (SDL_GameControllerGetButton(controller, (SDL_GameControllerButton)b)) {
+                return true;
+            }
+        }
+        // The triggers are axes; the sticks are left out, so a drifting stick doesn't claim a port.
+        return SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_TRIGGERLEFT) > 16384 ||
+            SDL_GameControllerGetAxis(controller, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) > 16384;
+    }
+
+    // Updates the port order and fills `out` with the controllers holding ports, in port
+    // order. Returns how many hold ports; `connected` gets how many controllers are open.
+    int get_port_controllers(std::array<SDL_GameController*, max_ports>& out, int* connected = nullptr) {
+        std::lock_guard lock{ port_mutex };
+        // The controllers recompinput has opened.
+        std::vector<std::pair<SDL_JoystickID, SDL_GameController*>> open;
+        int num_joysticks = SDL_NumJoysticks();
+        for (int i = 0; i < num_joysticks; i++) {
+            if (!SDL_IsGameController(i)) {
+                continue;
+            }
+            SDL_JoystickID id = SDL_JoystickGetDeviceInstanceID(i);
+            SDL_GameController* controller = SDL_GameControllerFromInstanceID(id);
+            if (controller != nullptr) {
+                open.emplace_back(id, controller);
+            }
+        }
+        auto find_open = [&](SDL_JoystickID id) -> SDL_GameController* {
+            for (const auto& [open_id, controller] : open) {
+                if (open_id == id) {
+                    return controller;
+                }
+            }
+            return nullptr;
+        };
+        // Disconnected controllers give up their ports.
+        std::erase_if(port_order, [&](SDL_JoystickID id) { return find_open(id) == nullptr; });
+        // Controllers pressing a button for the first time take the next port.
+        for (const auto& [id, controller] : open) {
+            if ((int)port_order.size() < max_ports && std::find(port_order.begin(), port_order.end(), id) == port_order.end() &&
+                controller_any_button(controller)) {
+                port_order.push_back(id);
+            }
+        }
+        int count = 0;
+        for (SDL_JoystickID id : port_order) {
+            out[count++] = find_open(id);
+        }
+        if (connected != nullptr) {
+            *connected = std::min((int)open.size(), max_ports);
+        }
+        return count;
+    }
+
+    float controller_field_analog(SDL_GameController* controller, const recompinput::InputField& field) {
+        switch (field.input_type) {
+        case recompinput::InputType::ControllerDigital:
+            if (field.input_id >= 0 && field.input_id < SDL_CONTROLLER_BUTTON_MAX) {
+                return SDL_GameControllerGetButton(controller, (SDL_GameControllerButton)field.input_id) ? 1.0f : 0.0f;
+            }
+            return 0.0f;
+        case recompinput::InputType::ControllerAnalog: {
+            int axis = std::abs(field.input_id) - 1;
+            if (axis < 0 || axis >= SDL_CONTROLLER_AXIS_MAX) {
+                return 0.0f;
+            }
+            float value = SDL_GameControllerGetAxis(controller, (SDL_GameControllerAxis)axis) * (1.0f / 32768.0f);
+            if (field.input_id < 0) {
+                value = -value;
+            }
+            return std::clamp(value, 0.0f, 1.0f);
+        }
+        default:
+            return 0.0f;
+        }
+    }
+
+    bool controller_field_digital(SDL_GameController* controller, const recompinput::InputField& field) {
+        if (field.input_type == recompinput::InputType::ControllerAnalog) {
+            return controller_field_analog(controller, field) >= recompinput::axis_digital_threshold;
+        }
+        return controller_field_analog(controller, field) > 0.0f;
+    }
+
+    // One controller (or none) and/or the keyboard, through the single-player bindings.
+    void read_port(SDL_GameController* controller, bool keyboard, uint16_t* buttons, float* x, float* y) {
+        using recompinput::GameInput;
+        static constexpr uint16_t button_values[] = {
+            0x8000, 0x4000, 0x2000, 0x0020, 0x0010, 0x1000, 0x0008,
+            0x0004, 0x0002, 0x0001, 0x0800, 0x0400, 0x0200, 0x0100,
+        };
+        // A..C Right, then the D-pad (N64_BUTTON_COUNT stops at C Right).
+        static_assert(std::size(button_values) == (size_t)GameInput::DPAD_RIGHT - (size_t)GameInput::N64_BUTTON_START + 1);
+        const int cont_profile = recompinput::profiles::get_sp_controller_profile_index();
+        const int kb_profile = recompinput::profiles::get_sp_keyboard_profile_index();
+        auto binding = [](int profile, GameInput input, size_t i) -> const recompinput::InputField& {
+            return recompinput::profiles::get_input_binding(profile, input, i);
+        };
+        auto cont_analog = [&](GameInput input) {
+            float v = 0.0f;
+            for (size_t i = 0; i < recompinput::num_bindings_per_input; i++) {
+                v += controller_field_analog(controller, binding(cont_profile, input, i));
+            }
+            return std::clamp(v, 0.0f, 1.0f);
+        };
+        auto kb_analog = [&](GameInput input) {
+            float v = 0.0f;
+            for (size_t i = 0; i < recompinput::num_bindings_per_input; i++) {
+                const recompinput::InputField& field = binding(kb_profile, input, i);
+                if (field.input_type == recompinput::InputType::Keyboard) {
+                    v += recompinput::get_input_analog(0, field);
+                }
+            }
+            return std::clamp(v, 0.0f, 1.0f);
+        };
+
+        uint16_t cur_buttons = 0;
+        float cur_x = 0.0f;
+        float cur_y = 0.0f;
+        for (size_t b = 0; b < std::size(button_values); b++) {
+            GameInput input = (GameInput)((size_t)GameInput::N64_BUTTON_START + b);
+            bool pressed = false;
+            for (size_t i = 0; i < recompinput::num_bindings_per_input; i++) {
+                if (controller != nullptr && cont_profile >= 0) {
+                    pressed |= controller_field_digital(controller, binding(cont_profile, input, i));
+                }
+                if (keyboard && kb_profile >= 0) {
+                    const recompinput::InputField& field = binding(kb_profile, input, i);
+                    if (field.input_type == recompinput::InputType::Keyboard) {
+                        pressed |= recompinput::get_input_digital(0, field);
+                    }
+                }
+            }
+            if (pressed) {
+                cur_buttons |= button_values[b];
+            }
+        }
+        if (controller != nullptr && cont_profile >= 0) {
+            cur_x = cont_analog(GameInput::X_AXIS_POS) - cont_analog(GameInput::X_AXIS_NEG);
+            cur_y = cont_analog(GameInput::Y_AXIS_POS) - cont_analog(GameInput::Y_AXIS_NEG);
+            recompinput::apply_joystick_deadzone(cur_x, cur_y, &cur_x, &cur_y);
+        }
+        if (keyboard && kb_profile >= 0) {
+            cur_x += kb_analog(GameInput::X_AXIS_POS) - kb_analog(GameInput::X_AXIS_NEG);
+            cur_y += kb_analog(GameInput::Y_AXIS_POS) - kb_analog(GameInput::Y_AXIS_NEG);
+        }
+        *buttons = cur_buttons;
+        *x = std::clamp(cur_x, -1.0f, 1.0f);
+        *y = std::clamp(cur_y, -1.0f, 1.0f);
+    }
+
+    bool get_port_input(int port, uint16_t* buttons, float* x, float* y) {
+        // recompinput's own multiplayer mode (players assigned in its menus) gives each
+        // player their controller and profiles already.
+        if (!recompinput::players::is_single_player_mode()) {
+            return recompinput::profiles::get_n64_input(port, buttons, x, y);
+        }
+        *buttons = 0;
+        *x = 0.0f;
+        *y = 0.0f;
+        if (port < 0 || port >= max_ports) {
+            return false;
+        }
+        std::array<SDL_GameController*, max_ports> controllers{};
+        int connected = 0;
+        int count = get_port_controllers(controllers, &connected);
+        if (port >= std::max(connected, 1)) {
+            return false;
+        }
+        if (!recompinput::game_input_disabled()) {
+            // Port 1 has the keyboard, and its controller once one has pressed a button.
+            read_port(port < count ? controllers[port] : nullptr, port == 0, buttons, x, y);
+        }
+        return true;
+    }
+}
+
 ultramodern::input::connected_device_info_t conker::frontend::get_connected_device_info(int controller_num) {
-    if (recompinput::players::is_single_player_mode() || recompinput::players::get_player_is_assigned(controller_num)) {
+    if (!recompinput::players::is_single_player_mode()) {
+        if (recompinput::players::get_player_is_assigned(controller_num)) {
+            return { ultramodern::input::Device::Controller, ultramodern::input::Pak::RumblePak };
+        }
+        return { ultramodern::input::Device::None, ultramodern::input::Pak::None };
+    }
+    std::array<SDL_GameController*, max_ports> controllers{};
+    int connected = 0;
+    get_port_controllers(controllers, &connected);
+    if (controller_num == 0 || controller_num < connected) {
         return { ultramodern::input::Device::Controller, ultramodern::input::Pak::RumblePak };
     }
     return { ultramodern::input::Device::None, ultramodern::input::Pak::None };
@@ -259,7 +465,7 @@ void conker::frontend::init(recomp::GameEntry& game) {
 void conker::frontend::set_callbacks(recomp::Configuration& cfg) {
     cfg.renderer_callbacks.create_render_context = create_render_context;
     cfg.gfx_callbacks = { create_gfx, create_window, update_gfx };
-    cfg.input_callbacks = { poll_inputs, recompinput::profiles::get_n64_input, recompinput::set_rumble,
+    cfg.input_callbacks = { poll_inputs, get_port_input, recompinput::set_rumble,
                             conker::get_connected_device_info };
     cfg.error_handling_callbacks.message_box = recompui::message_box;
 }

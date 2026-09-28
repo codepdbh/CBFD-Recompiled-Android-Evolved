@@ -32,8 +32,8 @@ yourself instead, read on.
 - Saving (EEPROM), stored per user.
 - A launcher with settings, controls and a mod menu (RecompFrontend, as in
   Zelda 64: Recompiled and Banjo: Recompiled).
-- Mod support (`.nrm` mods: function patches and hooks). Two example mods are
-  included: **Skip Any Cutscene** and **Cheats**.
+- Mod support (`.nrm` mods: function patches and hooks). Three mods are
+  included: **Skip Intro**, **Skip Any Cutscene** and **Cheats**.
 
 ## Status
 
@@ -243,9 +243,12 @@ Mods are `.nrm` files. Install one by copying it into the `mods` folder of the
 data folder above (or dropping it onto the Mods menu), then enable it in the
 **Mods** menu. Some mods have options there too.
 
-The included mods are in `mods/`. Build one on Linux, macOS (which also needs
-`brew install llvm`, as Apple's clang can't compile for MIPS) or in WSL, from the
-repository root, after `recomp/run.sh`:
+Each release has the included mods built, in its `Mods` zip (the same `.nrm`
+files work on every system). Their source is in `mods/`. Build one on Linux, macOS
+(which also needs `brew install llvm lld`, as Apple's clang can't compile for MIPS)
+or in WSL, from the repository root, after `recomp/run.sh`. It links with `ld.lld`
+(`sudo apt install lld`), or GNU ld (`mips-linux-gnu-ld`) where there's none, but
+GNU ld can't link a mod that calls the game's functions, such as Skip Intro:
 
 ```sh
 sh mods/build_mod.sh mods/skip_cutscenes
@@ -253,6 +256,8 @@ sh mods/build_mod.sh mods/skip_cutscenes
 
 The `.nrm` ends up in the mod's `build/` folder.
 
+- **Skip Intro** (`mods/skip_intro`): boots straight to the main menu, skipping
+  the notices, logos and the chainsaw opening.
 - **Skip Any Cutscene** (`mods/skip_cutscenes`): L skips a cutscene even the
   first time you see it. An option also allows skipping the ones the game never
   lets you skip.

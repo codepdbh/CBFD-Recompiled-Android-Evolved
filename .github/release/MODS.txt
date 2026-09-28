@@ -1,0 +1,16 @@
+Mods for Conker's Bad Fur Day: Recompiled
+https://github.com/sciaschi/CBFD-Recompiled
+
+These .nrm files work with the Windows, Linux and macOS versions alike.
+
+Installing
+  1. Start ConkerRecomp and open the Mods menu.
+  2. Drop the .nrm files onto it, or copy them into the mods folder of the data
+     folder (the Mods menu can open it).
+  3. Enable the ones you want. Some have options there too.
+
+  conker_skip_intro.nrm         Skip Intro: boots straight to the main menu.
+  conker_skip_any_cutscene.nrm  Skip Any Cutscene: L skips a cutscene even the
+                                first time you see it.
+  conker_cheats.nrm             Cheats: infinite health, infinite lives and a
+                                full wallet, each toggled in the mod's options.

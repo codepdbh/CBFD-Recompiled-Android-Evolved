@@ -1,6 +1,6 @@
-# Builds ready-to-play Windows, Linux and macOS packages. Players still supply their own
-# ROM: they pick it in the launcher the first time. The packages contain no ROM and no
-# assets.
+# Builds ready-to-play Windows, Linux and macOS packages, and a zip of the included mods.
+# Players still supply their own ROM: they pick it in the launcher the first time. The
+# packages contain no ROM and no assets.
 #
 # Building needs the ROM (the game's code is recompiled from it), so the workflow reads it
 # from a private repository, the way BanjoRecomp's does. Setup, once:
@@ -130,10 +130,22 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y git python3 cmake ninja-build clang pkg-config libsdl2-dev libdbus-1-dev libfreetype-dev
+          sudo apt-get install -y git python3 cmake ninja-build clang lld pkg-config libsdl2-dev libdbus-1-dev libfreetype-dev
 
       - name: Build
         run: ./build.sh rom-src/baserom.us.z64 < /dev/null
+
+      # The included mods, for every platform: a .nrm is the same file on all of them, and
+      # built here as mods/build_mod.sh doesn't run on Windows.
+      - name: Build the mods
+        run: |
+          mkdir -p package/mods
+          for toml in mods/*/mod.toml; do
+            sh mods/build_mod.sh "$(dirname "$toml")"
+            cp "$(dirname "$toml")"/build/*.nrm package/mods/
+          done
+          cp .github/release/MODS.txt package/mods/README.txt
+          (cd package/mods && zip -q "../ConkerRecompiled-${{ needs.prepare.outputs.tag }}-Mods.zip" *)
 
       - name: Package
         run: |
@@ -146,7 +158,7 @@ jobs:
           tar -czf "package/ConkerRecompiled-${{ needs.prepare.outputs.tag }}-Linux.tar.gz" -C package ConkerRecompiled
 
       - name: Upload to the release
-        run: gh release upload "${{ needs.prepare.outputs.tag }}" package/*.tar.gz --repo "$GITHUB_REPOSITORY" --clobber
+        run: gh release upload "${{ needs.prepare.outputs.tag }}" package/*.tar.gz package/*-Mods.zip --repo "$GITHUB_REPOSITORY" --clobber
 
   macos:
     needs: prepare

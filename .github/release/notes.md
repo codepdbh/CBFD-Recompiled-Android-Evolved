@@ -10,6 +10,8 @@ Linux needs SDL2, GTK 3 and FreeType (Ubuntu/Debian: `sudo apt install libsdl2-2
 
 macOS needs Apple Silicon and macOS 15 or later. The app isn't signed with an Apple developer ID, so macOS blocks it the first time: open it once, then choose **Open Anyway** in System Settings > Privacy & Security (or run `xattr -dr com.apple.quarantine ConkerRecomp.app` in Terminal first).
 
+The included mods (Skip Intro, Skip Any Cutscene and Cheats) are in the `Mods` zip, for every system. Unpack it and drop the `.nrm` files onto the launcher's **Mods** menu (or copy them into the `mods` folder of your data folder), then enable them there.
+
 To build it yourself instead, see the [README](https://github.com/sciaschi/CBFD-Recompiled#readme).
 
 macOS port by [nitrostemp](https://github.com/nitrostemp).

@@ -87,10 +87,14 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y git python3 cmake ninja-build clang pkg-config libsdl2-dev libdbus-1-dev libfreetype-dev
+          sudo apt-get install -y git python3 cmake ninja-build clang lld pkg-config libsdl2-dev libdbus-1-dev libfreetype-dev
 
       - name: Build
         run: ./build.sh rom-src/baserom.us.z64 < /dev/null
+
+      # As release.yml does, so a mod that stops building is found before a release.
+      - name: Build the mods
+        run: for toml in mods/*/mod.toml; do sh mods/build_mod.sh "$(dirname "$toml")"; done
 
   macos:
     needs: rom

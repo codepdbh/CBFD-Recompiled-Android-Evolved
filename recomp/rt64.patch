@@ -28,7 +28,7 @@ diff --git a/src/common/rt64_common.h b/src/common/rt64_common.h
 index f79adbf..6e0a6f9 100644
 --- a/src/common/rt64_common.h
 +++ b/src/common/rt64_common.h
-@@ -70,6 +70,12 @@ namespace RT64 {
+@@ -70,6 +70,18 @@ namespace RT64 {
          int x, y, w, h;
      };
  
@@ -37,6 +37,12 @@ index f79adbf..6e0a6f9 100644
 +    // Conker's 3D scissor stops 2 pixels short of each edge of the frame, and a full-frame rectangle drawn in the
 +    // same pair would otherwise put its 3D back in the 4:3 area.
 +    constexpr int32_t CoversWidthSlack = 4 * 4;
++
++    // The same for a 3D view's viewport, which may fall further short: Conker's split-screen multiplayer draws each
++    // player's view 32 pixels in from each edge, and the top view shares its pair with full-frame drawing, so with
++    // the rects' slack only the bottom view was widened. Rects keep the smaller slack, so 2D a little inside the
++    // frame isn't stretched to the widened edges.
++    constexpr int32_t CoversWidthViewportSlack = 40 * 4;
 +
      struct FixedRect {
          int32_t ulx;
@@ -1228,7 +1234,7 @@ index 9fae0d4..8cac619 100644
 -                bool coversWholeWidth = !intersectionRect.isEmpty() && (intersectionRect.ulx <= fbPair.scissorRect.ulx) && (intersectionRect.lrx >= fbPair.scissorRect.lrx);
 +                // With no pair scissor (all its triangles culled), compare with the projection's own, as ProjectionProcessor does.
 +                const FixedRect &pairScissor = fbPair.scissorRect.isNull() ? proj.scissorRect : fbPair.scissorRect;
-+                bool coversWholeWidth = !intersectionRect.isEmpty() && (intersectionRect.ulx <= pairScissor.ulx + CoversWidthSlack) && (intersectionRect.lrx >= pairScissor.lrx - CoversWidthSlack);
++                bool coversWholeWidth = !intersectionRect.isEmpty() && (intersectionRect.ulx <= pairScissor.ulx + CoversWidthViewportSlack) && (intersectionRect.lrx >= pairScissor.lrx - CoversWidthViewportSlack);
                  bool horizontalRatio = !intersectionRect.isEmpty() && (intersectionRect.width(true, true) > intersectionRect.height(true, true));
                  bool useWideViewport = (viewportOrigin == G_EX_ORIGIN_NONE) && coversWholeWidth && horizontalRatio;
 +                if (fbLog) {
@@ -1327,11 +1333,11 @@ index e842dcc..c0e4b44 100644
  
                  if (!intersectionRect.isEmpty()) {
 -                    bool coversWholeWidth = (intersectionRect.ulx <= fbPair.scissorRect.ulx) && (intersectionRect.lrx >= fbPair.scissorRect.lrx);
-+                    // Same slack as FramebufferRenderer's wide viewport check: the two must agree. A pair whose triangles were
++                    // Same slack as FramebufferRenderer's wide viewport check (CoversWidthViewportSlack): the two must agree. A pair whose triangles were
 +                    // all culled has no scissor; compare with the projection's own then, or this projection's transforms, which
 +                    // another pair that did draw may share, would lose their widening (Conker's hub, near the naughty/nice sign).
 +                    const FixedRect &pairScissor = fbPair.scissorRect.isNull() ? proj.scissorRect : fbPair.scissorRect;
-+                    bool coversWholeWidth = (intersectionRect.ulx <= pairScissor.ulx + CoversWidthSlack) && (intersectionRect.lrx >= pairScissor.lrx - CoversWidthSlack);
++                    bool coversWholeWidth = (intersectionRect.ulx <= pairScissor.ulx + CoversWidthViewportSlack) && (intersectionRect.lrx >= pairScissor.lrx - CoversWidthViewportSlack);
                      bool horizontalRatio = (intersectionRect.width(true, true) > intersectionRect.height(true, true));
                      adjustAspectRatio = (viewportOrigin == G_EX_ORIGIN_NONE) && coversWholeWidth && horizontalRatio;
                  }

@@ -1,0 +1,24 @@
+# Skip Intro: a mod for Conker's Bad Fur Day: Recompiled.
+
+[manifest]
+id = "conker_skip_intro"
+version = "1.0.2"
+display_name = "Skip Intro"
+description = """
+Starts the game outside the bar, a single button press away from the main menu: \
+skips the "For Mature Audiences Only" notice, the Dolby/Rare copyright notices, \
+the Nintendo logo, and the unskippable chainsaw opening scene."""
+short_description = "Boot straight to the main menu."
+authors = [ "Christopher Conley" ]
+game_id = "conker"
+minimum_recomp_version = "0.1.0"
+dependencies = []
+optional_dependencies = []
+native_libraries = []
+
+[inputs]
+elf_path = "build/mod.elf"
+mod_filename = "conker_skip_intro"
+func_reference_syms_file = "../syms/conker.us.syms.toml"
+data_reference_syms_files = [ "../syms/conker.us.datasyms.toml" ]
+additional_files = [ "thumb.png" ]
