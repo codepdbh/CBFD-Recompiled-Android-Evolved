@@ -1,0 +1,145 @@
+diff --git a/plume_vulkan.cpp b/plume_vulkan.cpp
+index f1dd503..9763cc0 100644
+--- a/plume_vulkan.cpp
++++ b/plume_vulkan.cpp
+@@ -2073,6 +2073,14 @@ namespace plume {
+ 
+     // VulkanSwapChain
+ 
++#if defined(__ANDROID__)
++    static ANativeWindow *(*androidWindowProvider)() = nullptr;
++
++    void setAndroidWindowProvider(ANativeWindow *(*provider)()) {
++        androidWindowProvider = provider;
++    }
++#endif
++
+     VulkanSwapChain::VulkanSwapChain(VulkanCommandQueue *commandQueue, const RenderSwapChainDesc &desc) {
+         assert(commandQueue != nullptr);
+         assert(desc.textureCount > 0);
+@@ -2114,6 +2122,10 @@ namespace plume {
+             fprintf(stderr, "vkCreateAndroidSurfaceKHR failed with error code 0x%X.\n", res);
+             return;
+         }
++
++        // Keep the window alive while the swap chain uses it: the app releases it when Android
++        // takes it away.
++        ANativeWindow_acquire(this->desc.renderWindow);
+ #   elif defined(__linux__)
+         assert(desc.renderWindow.display != 0);
+         assert(desc.renderWindow.window != 0);
+@@ -2247,6 +2259,9 @@ namespace plume {
+         if (surface != VK_NULL_HANDLE) {
+             VulkanInterface *renderInterface = commandQueue->device->renderInterface;
+             vkDestroySurfaceKHR(renderInterface->instance, surface, nullptr);
++#       if defined(__ANDROID__)
++            ANativeWindow_release(desc.renderWindow);
++#       endif
+         }
+ 
+         // Remove tracking from the parent command queue.
+@@ -2310,6 +2325,12 @@ namespace plume {
+     }
+ 
+     bool VulkanSwapChain::resize() {
++#   if defined(__ANDROID__)
++        if (!updateAndroidSurface()) {
++            width = height = 0;
++            return false;
++        }
++#   endif
+         getWindowSize(width, height);
+ 
+         // Don't recreate the swap chain at all if the window doesn't have a valid size.
+@@ -2401,6 +2422,11 @@ namespace plume {
+     }
+ 
+     bool VulkanSwapChain::needsResize() const {
++#   if defined(__ANDROID__)
++        if ((androidWindowProvider != nullptr) && (androidWindowProvider() != desc.renderWindow)) {
++            return true;
++        }
++#   endif
+         uint32_t windowWidth, windowHeight;
+         getWindowSize(windowWidth, windowHeight);
+         return (vk == VK_NULL_HANDLE) || (windowWidth != width) || (windowHeight != height) || (requiredPresentMode != createdPresentMode);
+@@ -2501,6 +2527,56 @@ namespace plume {
+         }
+     }
+ 
++#if defined(__ANDROID__)
++    // Moves the surface to the window Android shows now, if it changed. False while there's
++    // no window (the app is in the background) or the surface can't be made.
++    bool VulkanSwapChain::updateAndroidSurface() {
++        if (androidWindowProvider == nullptr) {
++            return surface != VK_NULL_HANDLE;
++        }
++
++        ANativeWindow *current = androidWindowProvider();
++        if (current == nullptr) {
++            return false;
++        }
++
++        if ((current == desc.renderWindow) && (surface != VK_NULL_HANDLE)) {
++            return true;
++        }
++
++        {
++            const std::scoped_lock queueLock(*commandQueue->queue->mutex);
++            vkQueueWaitIdle(commandQueue->queue->vk);
++        }
++
++        releaseImageViews();
++        releaseSwapChain();
++        VulkanInterface *renderInterface = commandQueue->device->renderInterface;
++        if (surface != VK_NULL_HANDLE) {
++            vkDestroySurfaceKHR(renderInterface->instance, surface, nullptr);
++            surface = VK_NULL_HANDLE;
++            ANativeWindow_release(desc.renderWindow);
++        }
++
++        desc.renderWindow = current;
++        VkAndroidSurfaceCreateInfoKHR surfaceCreateInfo = {};
++        surfaceCreateInfo.sType = VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR;
++        surfaceCreateInfo.window = current;
++        VkResult res = vkCreateAndroidSurfaceKHR(renderInterface->instance, &surfaceCreateInfo, nullptr, &surface);
++        if (res != VK_SUCCESS) {
++            fprintf(stderr, "vkCreateAndroidSurfaceKHR failed with error code 0x%X.\n", res);
++            surface = VK_NULL_HANDLE;
++            return false;
++        }
++
++        ANativeWindow_acquire(current);
++
++        VkBool32 presentSupported = false;
++        vkGetPhysicalDeviceSurfaceSupportKHR(commandQueue->device->physicalDevice, commandQueue->familyIndex, surface, &presentSupported);
++        return presentSupported;
++    }
++#endif
++
+     void VulkanSwapChain::releaseImageViews() {
+         for (VulkanTexture &texture : textures) {
+             if (texture.imageView != VK_NULL_HANDLE) {
+diff --git a/plume_vulkan.h b/plume_vulkan.h
+index 0a1edbe..d228431 100644
+--- a/plume_vulkan.h
++++ b/plume_vulkan.h
+@@ -261,8 +261,18 @@ namespace plume {
+         void getWindowSize(uint32_t &dstWidth, uint32_t &dstHeight) const;
+         void releaseSwapChain();
+         void releaseImageViews();
++#if defined(__ANDROID__)
++        bool updateAndroidSurface();
++#endif
+     };
+ 
++#if defined(__ANDROID__)
++    // Android replaces an app's window when it comes back from the background (and takes it
++    // away meanwhile): swap chains ask this for the one to show now, and move their surface
++    // to it. It returns null while there's none.
++    void setAndroidWindowProvider(ANativeWindow *(*provider)());
++#endif
++
+     struct VulkanFramebuffer : RenderFramebuffer {
+         VulkanDevice *device = nullptr;
+         VkFramebuffer vk = VK_NULL_HANDLE;

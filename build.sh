@@ -182,6 +182,8 @@ step "Patching the tools"
 apply_patch tools/N64Recomp recomp/n64recomp.patch
 apply_patch tools/N64ModernRuntime recomp/n64modernruntime.patch
 apply_patch tools/rt64 recomp/rt64.patch
+# plume (RT64's rendering layer, its submodule): Android's window coming back from the background.
+apply_patch tools/rt64/src/contrib/plume recomp/plume.patch
 # RecompFrontend on Android (SDL's ANativeWindow for RT64, RGBA swap chain).
 apply_patch tools/RecompFrontend recomp/recompfrontend.patch
 # RmlUi's fix for GCC 15 and later (RmlUi #766), which isn't in the RmlUi that RecompFrontend

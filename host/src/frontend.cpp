@@ -17,6 +17,16 @@
 // in X11's, whose None macro breaks ultramodern's Device::None.
 #include <SDL_syswm.h>
 #endif
+#if defined(__ANDROID__)
+#include <SDL_syswm.h>
+#include <android/native_window.h>
+
+// plume (rt64.patch): the window a swap chain shows, which Android replaces when the app comes
+// back from the background.
+namespace plume {
+    void setAndroidWindowProvider(ANativeWindow* (*provider)());
+}
+#endif
 
 #include "nfd.h"
 
@@ -39,6 +49,9 @@ std::vector<recomp::GameEntry> supported_games;
 SDL_Window* window = nullptr;
 
 void conker_mouse_camera_init();
+#if defined(__ANDROID__)
+void conker_android_attach_touch_controller(); // android/touch_controls.cpp
+#endif
 
 namespace {
     std::vector<char> thumbnail;
@@ -66,6 +79,9 @@ namespace {
 #if defined(__ANDROID__)
         // Landscape only: SDL would otherwise let a window wider than tall turn with the phone.
         SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+        // Back doesn't end the game: it's a key the game ignores (the on-screen menu button
+        // opens the menu).
+        SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");
 #endif
         // Debugging aid: CONKER_NO_CONTROLLER=1 ignores game controllers, e.g. for test
         // runs while someone else is playing with the controller on the same machine.
@@ -82,6 +98,12 @@ namespace {
         NFD_Init();
         // The mouse camera's scroll wheel zoom (mouse_camera.cpp).
         conker_mouse_camera_init();
+#if defined(__ANDROID__)
+        // The on-screen controls' virtual controller.
+        if (SDL_WasInit(SDL_INIT_JOYSTICK)) {
+            conker_android_attach_touch_controller();
+        }
+#endif
         return nullptr;
     }
 
@@ -102,6 +124,17 @@ namespace {
             std::fprintf(stderr, "[frontend] SDL_CreateWindow failed: %s\n", SDL_GetError());
             return {};
         }
+#if defined(__ANDROID__)
+        // SDL keeps the window Android shows now (none while the app is in the background).
+        plume::setAndroidWindowProvider([]() -> ANativeWindow* {
+            SDL_SysWMinfo info;
+            SDL_VERSION(&info.version);
+            if (window == nullptr || !SDL_GetWindowWMInfo(window, &info)) {
+                return nullptr;
+            }
+            return info.info.android.window;
+        });
+#endif
 #if defined(_WIN32)
         SDL_SysWMinfo info;
         SDL_VERSION(&info.version);

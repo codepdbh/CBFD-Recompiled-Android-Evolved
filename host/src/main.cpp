@@ -4,11 +4,12 @@
 // remappable keyboard/controller input (frontend.cpp) and plays sound
 // (audio_output.cpp); otherwise, or with --headless, it runs with a null renderer,
 // no input and no sound output.
-// Usage: ConkerRecomp [--rom <baserom.us.z64>] [--seconds N] [--headless] [--window WxH] [--data DIR]
+// Usage: ConkerRecomp [--rom <baserom.us.z64>] [--seconds N] [--start] [--headless] [--window WxH] [--data DIR]
 //   --rom PATH   the US ROM (a bare path works too, e.g. a ROM dropped onto the exe);
 //                only needed once, it is then kept with the game's data. The window
 //                build can also load it from the launcher.
 //   --seconds N  start the game right away (no launcher) and quit after N seconds
+//   --start      start the game right away (no launcher): Android's app has its own
 //   --headless   null renderer, no window, input or sound
 //   --window WxH open the window at this size, e.g. 2520x1080 to try a 21:9 screen
 //                (the window mode, windowed or fullscreen, is still the setting's)
@@ -419,6 +420,7 @@ int main(int argc, char** argv) {
     std::filesystem::path rom_path;
     std::filesystem::path data_dir;
     int seconds = 0;
+    bool start_game = false;
 #if defined(CONKER_RT64)
     headless = false;
 #endif
@@ -431,6 +433,9 @@ int main(int argc, char** argv) {
         }
         else if (std::strcmp(argv[i], "--data") == 0 && i + 1 < argc) {
             data_dir = argv[++i];
+        }
+        else if (std::strcmp(argv[i], "--start") == 0) {
+            start_game = true;
         }
         else if (std::strcmp(argv[i], "--headless") == 0) {
             headless = true;
@@ -474,7 +479,7 @@ int main(int argc, char** argv) {
     }
     std::filesystem::create_directories(recomp::get_config_path());
     // --seconds (test runs) starts the game directly instead of opening the launcher.
-    bool start_directly = headless || seconds > 0;
+    bool start_directly = headless || seconds > 0 || start_game;
 
     recomp::GameEntry game{};
     game.rom_hash = conker::roms::us_rom_hash;

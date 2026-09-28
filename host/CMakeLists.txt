@@ -207,6 +207,9 @@ if (CONKER_RT64)
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/assets" "$<TARGET_FILE_DIR:ConkerRecomp>/assets")
 
     target_sources(ConkerRecomp PRIVATE src/frontend.cpp src/conker_config.cpp src/audio_output.cpp)
+    if (ANDROID)
+        target_sources(ConkerRecomp PRIVATE src/android/touch_controls.cpp)
+    endif()
     # CONKER_RT64 selects the window build; the rest are what rt64 compiles its own headers with.
     target_compile_definitions(ConkerRecomp PRIVATE CONKER_RT64 HLSL_CPU)
     if (WIN32)
