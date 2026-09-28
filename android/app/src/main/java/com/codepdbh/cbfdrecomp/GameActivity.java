@@ -59,8 +59,9 @@ public class GameActivity extends SDLActivity {
         list.setPadding(pad, pad / 2, pad, 0);
 
         TextView about = new TextView(this);
-        about.setText("Guarda una copia de tu partida (lo último que el juego guardó en un checkpoint) "
-            + "y vuelve a ella cuando quieras. Al cargar, el juego se reinicia en esa copia.");
+        about.setText("Una copia guarda tu partida tal como el juego la guardó en el último checkpoint "
+            + "(no el momento exacto en que tocas Guardar). Al cargarla, el juego se reinicia: "
+            + "elige tu partida en su menú para seguir desde ese checkpoint.");
         about.setTextColor(Color.LTGRAY);
         about.setTextSize(13);
         list.addView(about);
@@ -78,7 +79,9 @@ public class GameActivity extends SDLActivity {
             row.setPadding(0, pad, 0, 0);
             TextView label = new TextView(this);
             String when = SaveSlots.describe(n);
-            label.setText("Espacio " + n + "\n" + (when != null ? when : "Vacío"));
+            String state = when == null ? "Vacío"
+                : when + (SaveSlots.sameAsSave(n) ? "\nIgual a tu partida actual" : "");
+            label.setText("Espacio " + n + "\n" + state);
             label.setTextColor(Color.WHITE);
             label.setTextSize(15);
             row.addView(label, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
@@ -106,7 +109,11 @@ public class GameActivity extends SDLActivity {
                 dialog.dismiss();
                 new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                     .setTitle("¿Cargar el espacio " + n + "?")
-                    .setMessage("El juego se reiniciará en esa copia. Lo que hayas avanzado desde tu último guardado se perderá.")
+                    .setMessage((SaveSlots.sameAsSave(n)
+                            ? "Esta copia es igual a tu partida actual: el juego no ha guardado nada desde entonces.\n\n"
+                            : "")
+                        + "El juego se reiniciará con esa copia. Después, elige tu partida en el menú del juego. "
+                        + "Lo que hayas avanzado desde tu último checkpoint se perderá.")
                     .setNegativeButton("Cancelar", null)
                     .setPositiveButton("Cargar", (d, w) -> restartWith(n))
                     .show();

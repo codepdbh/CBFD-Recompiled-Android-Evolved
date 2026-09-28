@@ -128,6 +128,10 @@ public class MainActivity extends Activity {
                 if (message != null) {
                     Toast.makeText(this, message, Toast.LENGTH_LONG).show();
                 } else {
+                    if (slot > 0) {
+                        Toast.makeText(this, "Copia " + slot + " cargada: elige tu partida en el menú del juego.",
+                            Toast.LENGTH_LONG).show();
+                    }
                     startGame();
                 }
             });

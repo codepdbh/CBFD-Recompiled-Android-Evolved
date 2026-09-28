@@ -46,6 +46,19 @@ final class SaveSlots {
         return DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(new Date(file.lastModified()));
     }
 
+    /** Whether the slot holds the same save as the game's now (nothing saved in between). */
+    static boolean sameAsSave(int slot) {
+        File a = saveFile(), b = slotFile(slot);
+        if (!a.isFile() || !b.isFile() || a.length() != b.length()) {
+            return false;
+        }
+        try (InputStream inA = new FileInputStream(a); InputStream inB = new FileInputStream(b)) {
+            return java.util.Arrays.equals(inA.readAllBytes(), inB.readAllBytes());
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
     static void save(int slot) throws IOException {
         File target = slotFile(slot);
         target.getParentFile().mkdirs();
