@@ -13,7 +13,7 @@ index 9dcfedf..0f4d924 100644
          // Samplers.
          bool samplerMirrorClampToEdge = false;
 diff --git a/plume_vulkan.cpp b/plume_vulkan.cpp
-index f1dd503..497ea3f 100644
+index f1dd503..212e9a0 100644
 --- a/plume_vulkan.cpp
 +++ b/plume_vulkan.cpp
 @@ -1171,6 +1171,11 @@ namespace plume {
@@ -39,7 +39,134 @@ index f1dd503..497ea3f 100644
              bindingFlags.clear();
              bindingFlags.resize(descriptorSetDesc.descriptorRangesCount, 0);
              bindingFlags[descriptorSetDesc.descriptorRangesCount - 1] = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
-@@ -1855,7 +1862,7 @@ namespace plume {
+@@ -1282,6 +1289,110 @@ namespace plume {
+ 
+     // VulkanShader
+ 
++    // Fits a SPIR-V module to a driver with smaller limits (older mobile GPUs): arrays of images
++    // longer than maxImages are shortened to it (RT64 declares 8192 textures, some drivers allow a
++    // few hundred per stage), and without descriptor indexing the non-uniform indexing it can't take
++    // is dropped (its decorations, capabilities and extension). False if nothing needed changing.
++    static bool adaptSpirvToDevice(const uint32_t *code, size_t wordCount, uint32_t maxImages, bool stripNonUniform, std::vector<uint32_t> &adapted) {
++        constexpr uint32_t OpExtension = 10, OpCapability = 17, OpTypeImage = 25, OpTypeSampledImage = 27, OpTypeArray = 28, OpConstant = 43, OpDecorate = 71;
++        constexpr uint32_t DecorationNonUniform = 5300;
++        constexpr uint32_t HeaderWords = 5;
++        if ((wordCount <= HeaderWords) || (code[0] != 0x07230203)) {
++            return false;
++        }
++
++        auto isNonUniformCapability = [](uint32_t capability) {
++            // ShaderNonUniform and the *ArrayNonUniformIndexing ones.
++            return (capability == 5301) || ((capability >= 5306) && (capability <= 5311));
++        };
++
++        // What there is: image types, integer constants, and arrays of images too long.
++        std::unordered_set<uint32_t> imageTypes;
++        std::unordered_map<uint32_t, std::pair<uint32_t, uint32_t>> constants; // id -> (type, value)
++        std::unordered_map<uint32_t, uint32_t> shortenedLengths; // old length constant id -> new one
++        bool changed = false;
++        uint32_t bound = code[3];
++        for (size_t i = HeaderWords; i < wordCount;) {
++            const uint32_t words = code[i] >> 16, opcode = code[i] & 0xFFFF;
++            if ((words == 0) || (i + words > wordCount)) {
++                return false;
++            }
++            if ((opcode == OpTypeImage) || (opcode == OpTypeSampledImage)) {
++                imageTypes.insert(code[i + 1]);
++            }
++            else if ((opcode == OpConstant) && (words == 4)) {
++                constants[code[i + 2]] = { code[i + 1], code[i + 3] };
++            }
++            else if ((opcode == OpTypeArray) && imageTypes.count(code[i + 2])) {
++                auto constant = constants.find(code[i + 3]);
++                if ((constant != constants.end()) && (constant->second.second > maxImages) && !shortenedLengths.count(code[i + 3])) {
++                    shortenedLengths[code[i + 3]] = bound++;
++                    changed = true;
++                }
++            }
++            else if (stripNonUniform && (opcode == OpCapability) && isNonUniformCapability(code[i + 1])) {
++                changed = true;
++            }
++            else if (stripNonUniform && (opcode == OpDecorate) && (words >= 3) && (code[i + 2] == DecorationNonUniform)) {
++                changed = true;
++            }
++            i += words;
++        }
++
++        if (!changed) {
++            return false;
++        }
++
++        adapted.clear();
++        adapted.reserve(wordCount + shortenedLengths.size() * 4);
++        adapted.insert(adapted.end(), code, code + HeaderWords);
++        adapted[3] = bound;
++        for (size_t i = HeaderWords; i < wordCount;) {
++            const uint32_t words = code[i] >> 16, opcode = code[i] & 0xFFFF;
++            bool keep = true;
++            if (stripNonUniform) {
++                if ((opcode == OpCapability) && isNonUniformCapability(code[i + 1])) {
++                    keep = false;
++                }
++                else if ((opcode == OpDecorate) && (words >= 3) && (code[i + 2] == DecorationNonUniform)) {
++                    keep = false;
++                }
++                else if (opcode == OpExtension) {
++                    const char *name = reinterpret_cast<const char *>(&code[i + 1]);
++                    if (strncmp(name, "SPV_EXT_descriptor_indexing", (words - 1) * 4) == 0) {
++                        keep = false;
++                    }
++                }
++            }
++
++            if (keep) {
++                const size_t start = adapted.size();
++                adapted.insert(adapted.end(), code + i, code + i + words);
++                if ((opcode == OpTypeArray) && imageTypes.count(code[i + 2])) {
++                    auto shortened = shortenedLengths.find(code[i + 3]);
++                    if (shortened != shortenedLengths.end()) {
++                        adapted[start + 3] = shortened->second;
++                    }
++                }
++
++                // The shorter length, right after the constant it replaces (so before its uses).
++                if ((opcode == OpConstant) && (words == 4)) {
++                    auto shortened = shortenedLengths.find(code[i + 2]);
++                    if (shortened != shortenedLengths.end()) {
++                        adapted.push_back((4u << 16) | OpConstant);
++                        adapted.push_back(code[i + 1]);
++                        adapted.push_back(shortened->second);
++                        adapted.push_back(maxImages);
++                    }
++                }
++            }
++
++            i += words;
++        }
++
++        return true;
++    }
++
+     VulkanShader::VulkanShader(VulkanDevice *device, const void *data, uint64_t size, const char *entryPointName, RenderShaderFormat format) {
+         assert(device != nullptr);
+         assert(data != nullptr);
+@@ -1297,6 +1408,15 @@ namespace plume {
+         shaderInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+         shaderInfo.pCode = reinterpret_cast<const uint32_t *>(data);
+         shaderInfo.codeSize = size;
++
++        thread_local std::vector<uint32_t> adaptedCode;
++        if (adaptSpirvToDevice(reinterpret_cast<const uint32_t *>(data), size / sizeof(uint32_t), device->maxBoundlessDescriptors,
++            !device->capabilities.descriptorIndexing, adaptedCode))
++        {
++            shaderInfo.pCode = adaptedCode.data();
++            shaderInfo.codeSize = adaptedCode.size() * sizeof(uint32_t);
++        }
++
+         VkResult res = vkCreateShaderModule(device->vk, &shaderInfo, nullptr, &vk);
+         if (res != VK_SUCCESS) {
+             fprintf(stderr, "vkCreateShaderModule failed with error code 0x%X.\n", res);
+@@ -1855,7 +1975,7 @@ namespace plume {
  
          this->descriptorSetCount = uint32_t(pipelineLayout->descriptorSetLayouts.size());
  
@@ -48,7 +175,7 @@ index f1dd503..497ea3f 100644
          if (res != VK_SUCCESS) {
              fprintf(stderr, "vkCreateRayTracingPipelinesKHR failed with error code 0x%X.\n", res);
              return;
-@@ -1899,6 +1906,12 @@ namespace plume {
+@@ -1899,6 +2019,12 @@ namespace plume {
              boundlessRangeSize = std::max(desc.boundlessRangeSize, 1U);
  
              const RenderDescriptorRange &lastDescriptorRange = desc.descriptorRanges[desc.descriptorRangesCount - 1];
@@ -61,7 +188,7 @@ index f1dd503..497ea3f 100644
              typeCounts[toVk(lastDescriptorRange.type)] += boundlessRangeSize;
              rangeCount--;
          }
-@@ -1910,7 +1923,8 @@ namespace plume {
+@@ -1910,7 +2036,8 @@ namespace plume {
  
          setLayout = new VulkanDescriptorSetLayout(device, desc);
  
@@ -71,7 +198,7 @@ index f1dd503..497ea3f 100644
          if (descriptorPool == VK_NULL_HANDLE) {
              return;
          }
-@@ -1922,7 +1936,7 @@ namespace plume {
+@@ -1922,7 +2049,7 @@ namespace plume {
          allocateInfo.descriptorSetCount = 1;
  
          VkDescriptorSetVariableDescriptorCountAllocateInfo countInfo = {};
@@ -80,7 +207,7 @@ index f1dd503..497ea3f 100644
              countInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
              countInfo.pDescriptorCounts = &boundlessRangeSize;
              countInfo.descriptorSetCount = 1;
-@@ -1934,6 +1948,8 @@ namespace plume {
+@@ -1934,6 +2061,8 @@ namespace plume {
              fprintf(stderr, "vkAllocateDescriptorSets failed with error code 0x%X.\n", res);
              return;
          }
@@ -89,7 +216,7 @@ index f1dd503..497ea3f 100644
      }
  
      VulkanDescriptorSet::~VulkanDescriptorSet() {
-@@ -2020,10 +2036,21 @@ namespace plume {
+@@ -2020,10 +2149,21 @@ namespace plume {
  
      void VulkanDescriptorSet::setDescriptor(uint32_t descriptorIndex, const VkDescriptorBufferInfo *bufferInfo, const VkDescriptorImageInfo *imageInfo, const VkBufferView *texelBufferView, void *pNext) {
          assert(descriptorIndex < setLayout->descriptorBindingIndices.size());
@@ -111,7 +238,7 @@ index f1dd503..497ea3f 100644
          VkWriteDescriptorSet writeDescriptor = {};
          writeDescriptor.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
          writeDescriptor.pNext = pNext;
-@@ -2073,6 +2100,35 @@ namespace plume {
+@@ -2073,6 +2213,35 @@ namespace plume {
  
      // VulkanSwapChain
  
@@ -147,7 +274,7 @@ index f1dd503..497ea3f 100644
      VulkanSwapChain::VulkanSwapChain(VulkanCommandQueue *commandQueue, const RenderSwapChainDesc &desc) {
          assert(commandQueue != nullptr);
          assert(desc.textureCount > 0);
-@@ -2114,6 +2170,10 @@ namespace plume {
+@@ -2114,6 +2283,10 @@ namespace plume {
              fprintf(stderr, "vkCreateAndroidSurfaceKHR failed with error code 0x%X.\n", res);
              return;
          }
@@ -158,7 +285,7 @@ index f1dd503..497ea3f 100644
  #   elif defined(__linux__)
          assert(desc.renderWindow.display != 0);
          assert(desc.renderWindow.window != 0);
-@@ -2247,6 +2307,9 @@ namespace plume {
+@@ -2247,6 +2420,9 @@ namespace plume {
          if (surface != VK_NULL_HANDLE) {
              VulkanInterface *renderInterface = commandQueue->device->renderInterface;
              vkDestroySurfaceKHR(renderInterface->instance, surface, nullptr);
@@ -168,7 +295,7 @@ index f1dd503..497ea3f 100644
          }
  
          // Remove tracking from the parent command queue.
-@@ -2310,6 +2373,12 @@ namespace plume {
+@@ -2310,6 +2486,12 @@ namespace plume {
      }
  
      bool VulkanSwapChain::resize() {
@@ -181,7 +308,7 @@ index f1dd503..497ea3f 100644
          getWindowSize(width, height);
  
          // Don't recreate the swap chain at all if the window doesn't have a valid size.
-@@ -2401,6 +2470,11 @@ namespace plume {
+@@ -2401,6 +2583,11 @@ namespace plume {
      }
  
      bool VulkanSwapChain::needsResize() const {
@@ -193,7 +320,7 @@ index f1dd503..497ea3f 100644
          uint32_t windowWidth, windowHeight;
          getWindowSize(windowWidth, windowHeight);
          return (vk == VK_NULL_HANDLE) || (windowWidth != width) || (windowHeight != height) || (requiredPresentMode != createdPresentMode);
-@@ -2501,6 +2575,56 @@ namespace plume {
+@@ -2501,6 +2688,56 @@ namespace plume {
          }
      }
  
@@ -250,7 +377,7 @@ index f1dd503..497ea3f 100644
      void VulkanSwapChain::releaseImageViews() {
          for (VulkanTexture &texture : textures) {
              if (texture.imageView != VK_NULL_HANDLE) {
-@@ -3626,17 +3750,27 @@ namespace plume {
+@@ -3626,17 +3863,27 @@ namespace plume {
          }
  
          if (res != VK_SUCCESS) {
@@ -279,7 +406,7 @@ index f1dd503..497ea3f 100644
              fprintf(stderr, "vkWaitForFences failed with error code 0x%X.\n", res);
              return;
          }
-@@ -3833,6 +3967,32 @@ namespace plume {
+@@ -3833,6 +4080,32 @@ namespace plume {
          void *featuresChain = nullptr;
          VkPhysicalDeviceDescriptorIndexingFeatures indexingFeatures = {};
          const bool descriptorIndexingFound = supportedOptionalExtensions.find(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME) != supportedOptionalExtensions.end();
@@ -312,7 +439,7 @@ index f1dd503..497ea3f 100644
          if (descriptorIndexingFound) {
              indexingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
              featuresChain = &indexingFeatures;
-@@ -4049,7 +4209,50 @@ namespace plume {
+@@ -4049,7 +4322,50 @@ namespace plume {
          createInfo.enabledExtensionCount = uint32_t(enabledExtensions.size());
          createInfo.pEnabledFeatures = &deviceFeatures.features;
  
@@ -363,7 +490,7 @@ index f1dd503..497ea3f 100644
          if (res != VK_SUCCESS) {
              fprintf(stderr, "vkCreateDevice failed with error code 0x%X.\n", res);
              return;
-@@ -4127,6 +4330,21 @@ namespace plume {
+@@ -4127,6 +4443,21 @@ namespace plume {
          capabilities.resolveRegion = true;
          capabilities.resolveModes = false;
          capabilities.descriptorIndexing = descriptorIndexingSupported;
