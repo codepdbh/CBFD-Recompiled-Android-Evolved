@@ -13,10 +13,10 @@ Guía de instalación para Android.
   **ALPHA experimental** (ver abajo).
 - **GPU con Vulkan 1.1.**
 - Unos **300 MB libres**: la ROM ocupa 64 MB y el juego guarda una copia verificada.
-- Recomendado: un procesador de gama alta reciente (por ejemplo, Snapdragon 8 Gen 2
-  o superior). Se probó en un Galaxy S25 Ultra (Snapdragon 8 Elite).
-  Los teléfonos con **MediaTek Helio/Dimensity (GPU Mali)** deberían funcionar,
-  pero todavía no se han probado.
+- Probado en un **Galaxy S25 Ultra** (Snapdragon 8 Elite) y en un **Redmi Note 8**
+  (Snapdragon 665, Adreno 610; también la versión de 32 bits). Los teléfonos con
+  **MediaTek Helio/Dimensity (GPU Mali)** deberían funcionar, pero todavía no se
+  han probado.
 
 ## Qué descargar
 
@@ -127,6 +127,13 @@ No son estados instantáneos como en un emulador: este port no se puede congelar
 en un segundo cualquiera.
 
 ## Si algo va mal
+
+**Envía un informe:** después de un cierre o un error, abre la app y en la
+pantalla de inicio toca **"📋 ¿Problemas? Enviar el informe del último juego"**.
+Puedes mandarlo **por correo** o como **issue en GitHub**: el informe se copia solo
+y solo tienes que pegarlo. Incluye tu modelo de teléfono y lo que pasó en el
+último juego, no tu ROM ni tus partidas. También está en
+`ConkerRecompiled/logs/game.log`.
 
 - **Va lento o se calienta:** en **Ajustes** elige calidad **Fluido** y
   **30 o 60 cuadros por segundo**.
