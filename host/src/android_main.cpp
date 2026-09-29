@@ -104,6 +104,35 @@ namespace {
     }
 }
 
+#if defined(__arm__)
+// 32-bit ARM's allocator only aligns to 8 bytes, but hlslpp's vectors and matrices (RT64's math)
+// are 16-byte aligned, and the compiler loads them with instructions that fault or misread when
+// they aren't (distorted geometry, bus errors). Every C++ allocation 16-byte aligned, as on arm64.
+#include <malloc.h>
+#include <new>
+
+namespace {
+    void* aligned_new(size_t size) {
+        void* memory = memalign(16, size != 0 ? size : 1);
+        if (memory == nullptr) {
+            throw std::bad_alloc();
+        }
+        return memory;
+    }
+}
+
+void* operator new(size_t size) { return aligned_new(size); }
+void* operator new[](size_t size) { return aligned_new(size); }
+void* operator new(size_t size, const std::nothrow_t&) noexcept { return memalign(16, size != 0 ? size : 1); }
+void* operator new[](size_t size, const std::nothrow_t&) noexcept { return memalign(16, size != 0 ? size : 1); }
+void operator delete(void* memory) noexcept { free(memory); }
+void operator delete[](void* memory) noexcept { free(memory); }
+void operator delete(void* memory, size_t) noexcept { free(memory); }
+void operator delete[](void* memory, size_t) noexcept { free(memory); }
+void operator delete(void* memory, const std::nothrow_t&) noexcept { free(memory); }
+void operator delete[](void* memory, const std::nothrow_t&) noexcept { free(memory); }
+#endif
+
 // Sends everything written to stdout and stderr to logcat and the log file, a line at a time.
 void conker_android_redirect_output() {
     static bool redirected = false;
