@@ -1,8 +1,14 @@
 diff --git a/plume_render_interface_types.h b/plume_render_interface_types.h
-index 9dcfedf..0f4d924 100644
+index 9dcfedf..f90f896 100644
 --- a/plume_render_interface_types.h
 +++ b/plume_render_interface_types.h
-@@ -1782,6 +1782,9 @@ namespace plume {
+@@ -1778,10 +1778,15 @@ namespace plume {
+ 
+         // Bindless resources.
+         bool descriptorIndexing = false;
++        // The most textures a shader can index in one array (a few hundred on older mobile GPUs).
++        uint32_t maxTextureArraySize = UINT32_MAX;
+         bool scalarBlockLayout = false;
  
          // Buffers.
          bool bufferDeviceAddress = false;
@@ -13,7 +19,7 @@ index 9dcfedf..0f4d924 100644
          // Samplers.
          bool samplerMirrorClampToEdge = false;
 diff --git a/plume_vulkan.cpp b/plume_vulkan.cpp
-index f1dd503..212e9a0 100644
+index f1dd503..568b2a1 100644
 --- a/plume_vulkan.cpp
 +++ b/plume_vulkan.cpp
 @@ -1171,6 +1171,11 @@ namespace plume {
@@ -175,20 +181,25 @@ index f1dd503..212e9a0 100644
          if (res != VK_SUCCESS) {
              fprintf(stderr, "vkCreateRayTracingPipelinesKHR failed with error code 0x%X.\n", res);
              return;
-@@ -1899,6 +2019,12 @@ namespace plume {
+@@ -1899,7 +2019,16 @@ namespace plume {
              boundlessRangeSize = std::max(desc.boundlessRangeSize, 1U);
  
              const RenderDescriptorRange &lastDescriptorRange = desc.descriptorRanges[desc.descriptorRangesCount - 1];
+-            typeCounts[toVk(lastDescriptorRange.type)] += boundlessRangeSize;
 +            // No more than the layout's range, which the driver's limit may have made smaller.
 +            boundlessRangeSize = std::min({ boundlessRangeSize, lastDescriptorRange.count, device->maxBoundlessDescriptors });
 +            // Without descriptor indexing there's no variable count: the range is always whole.
++            const uint32_t wholeRangeSize = std::min(lastDescriptorRange.count, device->maxBoundlessDescriptors);
 +            if (!device->capabilities.descriptorIndexing) {
-+                boundlessRangeSize = std::min(lastDescriptorRange.count, device->maxBoundlessDescriptors);
++                boundlessRangeSize = wholeRangeSize;
 +            }
-             typeCounts[toVk(lastDescriptorRange.type)] += boundlessRangeSize;
++            // The pool holds the whole range either way: some drivers (Adreno 610's newer ones)
++            // allocate a variable count set as if it were whole, and ran out of the pool.
++            typeCounts[toVk(lastDescriptorRange.type)] += wholeRangeSize;
              rangeCount--;
          }
-@@ -1910,7 +2036,8 @@ namespace plume {
+ 
+@@ -1910,7 +2039,8 @@ namespace plume {
  
          setLayout = new VulkanDescriptorSetLayout(device, desc);
  
@@ -198,7 +209,7 @@ index f1dd503..212e9a0 100644
          if (descriptorPool == VK_NULL_HANDLE) {
              return;
          }
-@@ -1922,7 +2049,7 @@ namespace plume {
+@@ -1922,7 +2052,7 @@ namespace plume {
          allocateInfo.descriptorSetCount = 1;
  
          VkDescriptorSetVariableDescriptorCountAllocateInfo countInfo = {};
@@ -207,7 +218,7 @@ index f1dd503..212e9a0 100644
              countInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
              countInfo.pDescriptorCounts = &boundlessRangeSize;
              countInfo.descriptorSetCount = 1;
-@@ -1934,6 +2061,8 @@ namespace plume {
+@@ -1934,6 +2064,8 @@ namespace plume {
              fprintf(stderr, "vkAllocateDescriptorSets failed with error code 0x%X.\n", res);
              return;
          }
@@ -216,7 +227,7 @@ index f1dd503..212e9a0 100644
      }
  
      VulkanDescriptorSet::~VulkanDescriptorSet() {
-@@ -2020,10 +2149,21 @@ namespace plume {
+@@ -2020,10 +2152,21 @@ namespace plume {
  
      void VulkanDescriptorSet::setDescriptor(uint32_t descriptorIndex, const VkDescriptorBufferInfo *bufferInfo, const VkDescriptorImageInfo *imageInfo, const VkBufferView *texelBufferView, void *pNext) {
          assert(descriptorIndex < setLayout->descriptorBindingIndices.size());
@@ -238,7 +249,7 @@ index f1dd503..212e9a0 100644
          VkWriteDescriptorSet writeDescriptor = {};
          writeDescriptor.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
          writeDescriptor.pNext = pNext;
-@@ -2073,6 +2213,35 @@ namespace plume {
+@@ -2073,6 +2216,35 @@ namespace plume {
  
      // VulkanSwapChain
  
@@ -274,7 +285,7 @@ index f1dd503..212e9a0 100644
      VulkanSwapChain::VulkanSwapChain(VulkanCommandQueue *commandQueue, const RenderSwapChainDesc &desc) {
          assert(commandQueue != nullptr);
          assert(desc.textureCount > 0);
-@@ -2114,6 +2283,10 @@ namespace plume {
+@@ -2114,6 +2286,10 @@ namespace plume {
              fprintf(stderr, "vkCreateAndroidSurfaceKHR failed with error code 0x%X.\n", res);
              return;
          }
@@ -285,7 +296,7 @@ index f1dd503..212e9a0 100644
  #   elif defined(__linux__)
          assert(desc.renderWindow.display != 0);
          assert(desc.renderWindow.window != 0);
-@@ -2247,6 +2420,9 @@ namespace plume {
+@@ -2247,6 +2423,9 @@ namespace plume {
          if (surface != VK_NULL_HANDLE) {
              VulkanInterface *renderInterface = commandQueue->device->renderInterface;
              vkDestroySurfaceKHR(renderInterface->instance, surface, nullptr);
@@ -295,7 +306,7 @@ index f1dd503..212e9a0 100644
          }
  
          // Remove tracking from the parent command queue.
-@@ -2310,6 +2486,12 @@ namespace plume {
+@@ -2310,6 +2489,12 @@ namespace plume {
      }
  
      bool VulkanSwapChain::resize() {
@@ -308,7 +319,7 @@ index f1dd503..212e9a0 100644
          getWindowSize(width, height);
  
          // Don't recreate the swap chain at all if the window doesn't have a valid size.
-@@ -2401,6 +2583,11 @@ namespace plume {
+@@ -2401,6 +2586,11 @@ namespace plume {
      }
  
      bool VulkanSwapChain::needsResize() const {
@@ -320,7 +331,7 @@ index f1dd503..212e9a0 100644
          uint32_t windowWidth, windowHeight;
          getWindowSize(windowWidth, windowHeight);
          return (vk == VK_NULL_HANDLE) || (windowWidth != width) || (windowHeight != height) || (requiredPresentMode != createdPresentMode);
-@@ -2501,6 +2688,56 @@ namespace plume {
+@@ -2501,6 +2691,56 @@ namespace plume {
          }
      }
  
@@ -377,7 +388,7 @@ index f1dd503..212e9a0 100644
      void VulkanSwapChain::releaseImageViews() {
          for (VulkanTexture &texture : textures) {
              if (texture.imageView != VK_NULL_HANDLE) {
-@@ -3626,17 +3863,27 @@ namespace plume {
+@@ -3626,17 +3866,27 @@ namespace plume {
          }
  
          if (res != VK_SUCCESS) {
@@ -406,7 +417,7 @@ index f1dd503..212e9a0 100644
              fprintf(stderr, "vkWaitForFences failed with error code 0x%X.\n", res);
              return;
          }
-@@ -3833,6 +4080,32 @@ namespace plume {
+@@ -3833,6 +4083,32 @@ namespace plume {
          void *featuresChain = nullptr;
          VkPhysicalDeviceDescriptorIndexingFeatures indexingFeatures = {};
          const bool descriptorIndexingFound = supportedOptionalExtensions.find(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME) != supportedOptionalExtensions.end();
@@ -439,7 +450,7 @@ index f1dd503..212e9a0 100644
          if (descriptorIndexingFound) {
              indexingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
              featuresChain = &indexingFeatures;
-@@ -4049,7 +4322,50 @@ namespace plume {
+@@ -4049,7 +4325,50 @@ namespace plume {
          createInfo.enabledExtensionCount = uint32_t(enabledExtensions.size());
          createInfo.pEnabledFeatures = &deviceFeatures.features;
  
@@ -490,10 +501,11 @@ index f1dd503..212e9a0 100644
          if (res != VK_SUCCESS) {
              fprintf(stderr, "vkCreateDevice failed with error code 0x%X.\n", res);
              return;
-@@ -4127,6 +4443,21 @@ namespace plume {
+@@ -4127,6 +4446,22 @@ namespace plume {
          capabilities.resolveRegion = true;
          capabilities.resolveModes = false;
          capabilities.descriptorIndexing = descriptorIndexingSupported;
++        capabilities.maxTextureArraySize = maxBoundlessDescriptors;
 +        for (VkFormat format : { VK_FORMAT_R8_UINT, VK_FORMAT_R16_UINT }) {
 +            VkFormatProperties formatProperties = {};
 +            vkGetPhysicalDeviceFormatProperties(physicalDevice, format, &formatProperties);

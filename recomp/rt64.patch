@@ -1158,7 +1158,7 @@ index 5a331aa..3d4fca2 100644
                                  G_IM_FMT_DEPTH, f, depthFb->readHeight, readRowCount, ext.shaderLibrary);
  
 diff --git a/src/render/rt64_framebuffer_renderer.cpp b/src/render/rt64_framebuffer_renderer.cpp
-index 9fae0d4..b8acce6 100644
+index 9fae0d4..bc9f114 100644
 --- a/src/render/rt64_framebuffer_renderer.cpp
 +++ b/src/render/rt64_framebuffer_renderer.cpp
 @@ -7,6 +7,7 @@
@@ -1169,7 +1169,128 @@ index 9fae0d4..b8acce6 100644
  #include "common/rt64_math.h"
  #include "hle/rt64_color_converter.h"
  #include "gbi/rt64_f3d.h"
-@@ -1435,6 +1436,16 @@ namespace RT64 {
+@@ -152,6 +153,14 @@ namespace RT64 {
+         shaderUploader = std::make_unique<BufferUploader>(worker->device);
+         descCommonSet = std::make_unique<FramebufferRendererDescriptorCommonSet>(shaderLibrary->samplerLibrary, worker->device->getCapabilities().raytracing, worker->device);
+ 
++        // A device that can't index all the textures the shaders declare numbers them per workload.
++        const uint32_t maxTextureArraySize = worker->device->getCapabilities().maxTextureArraySize;
++        if (maxTextureArraySize < uint32_t(FramebufferRendererDescriptorTextureSet::UpperRange)) {
++            compactTextures = true;
++            compactTextureLimit = maxTextureArraySize;
++            fprintf(stderr, "RT64: textures numbered per frame, up to %u.\n", compactTextureLimit);
++        }
++
+ #   if RT_ENABLED
+         if (rtSupport) {
+             this->rtSupport = rtSupport;
+@@ -221,6 +230,33 @@ namespace RT64 {
+         textureCacheReplacementMapEnabled = textureCache->textureMap.replacementMapEnabled;
+         dynamicTextureViewVector.clear();
+         dynamicTextureBarrierVector.clear();
++        compactTextureMap.clear();
++        compactTextureSlots.clear();
++    }
++
++    uint32_t FramebufferRenderer::compactIndex(uint32_t index) {
++        if (!compactTextures) {
++            return index;
++        }
++
++        auto it = compactTextureMap.find(index);
++        if (it != compactTextureMap.end()) {
++            return it->second;
++        }
++
++        if (compactTextureSlots.size() >= compactTextureLimit) {
++            // More textures in one workload than the device can index: they show the first one.
++            if (!compactTextureOverflowReported) {
++                fprintf(stderr, "RT64: more than %u textures in a frame; the rest are drawn with the first.\n", compactTextureLimit);
++                compactTextureOverflowReported = true;
++            }
++            return 0;
++        }
++
++        const uint32_t slot = uint32_t(compactTextureSlots.size());
++        compactTextureSlots.push_back(index);
++        compactTextureMap[index] = slot;
++        return slot;
+     }
+ 
+     void FramebufferRenderer::createGPUTiles(const DrawCallTile *callTiles, uint32_t callTileCount, interop::GPUTile *dstGPUTiles, const FramebufferManager *fbManager, 
+@@ -243,7 +279,7 @@ namespace RT64 {
+                     gpuTile.ulScale.y = tileCopy.ulScaleT ? gpuTile.tcScale.y : 1.0f;
+                     gpuTile.texelShift = tileCopy.texelShift;
+                     gpuTile.texelMask = tileCopy.texelMask;
+-                    gpuTile.textureIndex = getTextureIndex(tileCopy);
++                    gpuTile.textureIndex = compactIndex(getTextureIndex(tileCopy));
+                     gpuTile.textureDimensions = interop::float3(float(tileCopy.textureWidth), float(tileCopy.textureHeight), 1.0f);
+                     gpuTile.flags.alphaIsCvg = !callTile.reinterpretTile;
+                     gpuTile.flags.highRes = true;
+@@ -265,7 +301,7 @@ namespace RT64 {
+                 gpuTile.ulScale.y = gpuTile.tcScale.y;
+                 gpuTile.texelShift = { 0, 0 };
+                 gpuTile.texelMask = { UINT_MAX, UINT_MAX };
+-                gpuTile.textureIndex = textureIndex;
++                gpuTile.textureIndex = compactIndex(textureIndex);
+                 gpuTile.flags.alphaIsCvg = false;
+                 gpuTile.flags.highRes = textureReplaced;
+                 gpuTile.flags.fromCopy = false;
+@@ -310,7 +346,40 @@ namespace RT64 {
+         assert(worker != nullptr);
+         assert(drawBuffers != nullptr);
+         
+-        const bool createSet = (descTextureSet == nullptr) || (descTextureSet->textureCacheSize < (textureCacheSize + 1));
++        if (compactTextures) {
++            // Only the workload's textures, in the slots compactIndex gave them.
++            if (descTextureSet == nullptr) {
++                descTextureSet = std::make_unique<FramebufferRendererDescriptorTextureSet>(worker->device, compactTextureLimit);
++            }
++
++            for (uint32_t slot = 0; slot < uint32_t(compactTextureSlots.size()); slot++) {
++                const uint32_t index = compactTextureSlots[slot];
++                bool dynamic = false;
++                for (const DynamicTextureView &dynamicView : dynamicTextureViewVector) {
++                    if (dynamicView.dstIndex == index) {
++                        descTextureSet->setTexture(slot, dynamicView.texture, RenderTextureLayout::SHADER_READ, dynamicView.textureView);
++                        dynamic = true;
++                        break;
++                    }
++                }
++
++                if (dynamic || (index >= textureCacheTextures.size()) || (textureCacheTextures[index] == nullptr)) {
++                    continue;
++                }
++
++                if (textureCacheReplacementMapEnabled && (textureCacheTextureReplacements[index] != nullptr)) {
++                    descTextureSet->setTexture(slot, textureCacheTextureReplacements[index]->texture.get(), RenderTextureLayout::SHADER_READ);
++                }
++                else if (textureCacheTextures[index]->texture != nullptr) {
++                    descTextureSet->setTexture(slot, textureCacheTextures[index]->texture.get(), RenderTextureLayout::SHADER_READ);
++                }
++                else {
++                    descTextureSet->setTexture(slot, textureCacheTextures[index]->tmem.get(), RenderTextureLayout::SHADER_READ);
++                }
++            }
++        }
++
++        const bool createSet = !compactTextures && ((descTextureSet == nullptr) || (descTextureSet->textureCacheSize < (textureCacheSize + 1)));
+         if (createSet) {
+             descTextureSet = std::make_unique<FramebufferRendererDescriptorTextureSet>(worker->device, ((textureCacheSize + 1) * 3) / 2);
+         }
+@@ -378,6 +447,11 @@ namespace RT64 {
+         descCommonSet->setBuffer(descCommonSet->GPUTiles, drawBuffers->gpuTilesBuffer.get(), RenderBufferStructuredView(sizeof(interop::GPUTile)));
+         descCommonSet->setBuffer(descCommonSet->DynamicRenderParams, drawBuffers->renderParamsBuffer.get(), RenderBufferStructuredView(sizeof(interop::RenderParams)));
+ 
++        // Compact textures were written above, in their slots.
++        if (compactTextures) {
++            return;
++        }
++
+         // Make sure the versions vector matches the texture cache size.
+         descriptorTextureVersions.resize(textureCacheSize, 0);
+ 
+@@ -1435,6 +1509,16 @@ namespace RT64 {
          const float scissorRatio = static_cast<float>(fbPair.scissorRect.width(false, true)) / static_cast<float>(fbPair.scissorRect.height(false, true));
          const bool adjustRatio = (abs((scissorRatio / p.aspectRatioSource) - 1.0f) < SimilarityPercentage);
          const float aspectRatioScale = adjustRatio ? (p.aspectRatioTarget / p.aspectRatioSource) : 1.0f;
@@ -1186,7 +1307,7 @@ index 9fae0d4..b8acce6 100644
          InstanceDrawCall instanceDrawCall;
          interop::RenderIndices renderIndices;
          uint32_t globalCallIndex = 0;
-@@ -1488,9 +1499,17 @@ namespace RT64 {
+@@ -1488,9 +1572,17 @@ namespace RT64 {
                  // The call's scissor spans the whole width of the framebuffer pair scissor. Custom origin must not be in use to be able to use the stretched viewport.
                  const auto &viewport = drawData.rspViewports[proj.transformsIndex];
                  FixedRect intersectionRect = proj.scissorRect.intersection(viewport.rect(viewportClipRatios));
@@ -1205,7 +1326,7 @@ index 9fae0d4..b8acce6 100644
                  if (useWideViewport) {
                      projInvRatioScale = 1.0f;
                  }
-@@ -1607,7 +1626,14 @@ namespace RT64 {
+@@ -1607,7 +1699,14 @@ namespace RT64 {
                      {
                          triangles.shaderDesc = call.shaderDesc;
  
@@ -1220,7 +1341,7 @@ index 9fae0d4..b8acce6 100644
                          if (gpuShader != nullptr) {
                              triangles.pipeline = gpuShader->pipeline.get();
                          }
-@@ -1625,6 +1651,7 @@ namespace RT64 {
+@@ -1625,6 +1724,7 @@ namespace RT64 {
  
                          float invRatioScale = 1.0f / aspectRatioScale;
                          float horizontalMisalignment = 0.0f;
@@ -1228,7 +1349,7 @@ index 9fae0d4..b8acce6 100644
                          switch (proj.type) {
                          case Projection::Type::Perspective:
                          case Projection::Type::Orthographic: {
-@@ -1645,14 +1672,46 @@ namespace RT64 {
+@@ -1645,14 +1745,46 @@ namespace RT64 {
                              // The call's scissor spans the whole width of the framebuffer pair scissor. The rect must not be using extended origins.
                              const bool regularOrigins = (call.callDesc.rectLeftOrigin == G_EX_ORIGIN_NONE) && (call.callDesc.rectRightOrigin == G_EX_ORIGIN_NONE);
                              const bool coversScissorWidth = regularOrigins && (call.callDesc.rect.ulx <= fbPair.scissorRect.ulx) && (call.callDesc.rect.lrx >= fbPair.scissorRect.lrx);
@@ -1276,7 +1397,7 @@ index 9fae0d4..b8acce6 100644
                              triangles.screenScale = { viewportRect.width / framebuffer.viewport.width, viewportRect.height / framebuffer.viewport.height };
                              triangles.screenOffset.x = halfPixelOffset.x + ((viewportRect.x + viewportRect.width / 2.0f) - halfViewportSize.x) / halfViewportSize.x;
                              triangles.screenOffset.y = halfPixelOffset.y + (halfViewportSize.y - (viewportRect.y + viewportRect.height / 2.0f)) / halfViewportSize.y;
-@@ -1676,7 +1735,12 @@ namespace RT64 {
+@@ -1676,7 +1808,12 @@ namespace RT64 {
                              break;
                          }
  
@@ -1290,6 +1411,36 @@ index 9fae0d4..b8acce6 100644
  
                          bool usesViewport = (proj.type == Projection::Type::Perspective) || (proj.type == Projection::Type::Orthographic);
                          if (usesViewport) {
+diff --git a/src/render/rt64_framebuffer_renderer.h b/src/render/rt64_framebuffer_renderer.h
+index 3add9c3..3bc4d0b 100644
+--- a/src/render/rt64_framebuffer_renderer.h
++++ b/src/render/rt64_framebuffer_renderer.h
+@@ -5,6 +5,8 @@
+ #pragma once
+ 
+ #include <stdint.h>
++#include <unordered_map>
++#include <vector>
+ 
+ #include "common/rt64_emulator_configuration.h"
+ #include "common/rt64_user_configuration.h"
+@@ -64,6 +66,16 @@ namespace RT64 {
+         std::vector<Texture *> textureCacheTextureReplacements;
+         std::vector<uint32_t> textureCacheFreeSpaces;
+         uint32_t textureCacheSize = 0;
++
++        // Compact texture indices, for devices that can't index as many textures as the cache holds
++        // (older mobile GPUs): each workload numbers the textures it uses from 0, up to the device's
++        // limit, and only those go in the descriptor set. Maps cache (or dynamic) index -> slot.
++        bool compactTextures = false;
++        uint32_t compactTextureLimit = 0;
++        std::unordered_map<uint32_t, uint32_t> compactTextureMap;
++        std::vector<uint32_t> compactTextureSlots;
++        bool compactTextureOverflowReported = false;
++        uint32_t compactIndex(uint32_t index);
+         uint32_t textureCacheGlobalVersion = 0;
+         bool textureCacheReplacementMapEnabled = false;
+         std::vector<InstanceDrawCall> instanceDrawCallVector;
 diff --git a/src/render/rt64_native_target.cpp b/src/render/rt64_native_target.cpp
 index 6891b7b..e040322 100644
 --- a/src/render/rt64_native_target.cpp
