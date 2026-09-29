@@ -31,6 +31,8 @@ public class GameActivity extends SDLActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        // The log players can send (GameLog), before the game's library starts writing to it.
+        GameLog.begin(this);
         super.onCreate(savedInstanceState);
         // Draw under the camera cutout too: the game fills the whole screen.
         getWindow().getAttributes().layoutInDisplayCutoutMode =

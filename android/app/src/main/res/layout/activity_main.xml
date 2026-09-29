@@ -112,5 +112,16 @@
             android:text="En el juego: ✎ mueve y cambia el tamaño de los botones, y ☰ abre el menú completo."
             android:textColor="#9A8A7A"
             android:textSize="12sp" />
+
+        <TextView
+            android:id="@+id/report"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:text="📋  ¿Problemas? Enviar el informe del último juego"
+            android:textColor="#F08A24"
+            android:textSize="13sp" />
     </LinearLayout>
 </LinearLayout>

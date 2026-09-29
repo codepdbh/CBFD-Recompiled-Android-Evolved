@@ -74,6 +74,7 @@ public class MainActivity extends Activity {
         modsButton.setOnClickListener(v -> showMods());
         findViewById(R.id.settings).setOnClickListener(v ->
             startActivity(new Intent(this, SettingsActivity.class)));
+        findViewById(R.id.report).setOnClickListener(v -> sendReport());
         if (!android.os.Process.is64Bit()) {
             // The 32-bit build: an alpha, and without mods (the runtime can't load them there).
             modsButton.setVisibility(View.GONE);
@@ -587,6 +588,20 @@ public class MainActivity extends Activity {
                 }
             }
         }
+    }
+
+    /** Shares the last game's log (GameLog) as text: WhatsApp, Telegram, email... */
+    private void sendReport() {
+        String log = GameLog.read(60000);
+        if (log == null) {
+            Toast.makeText(this, "Todavía no hay informe: juega una vez y vuelve aquí.", Toast.LENGTH_LONG).show();
+            return;
+        }
+        Intent intent = new Intent(Intent.ACTION_SEND);
+        intent.setType("text/plain");
+        intent.putExtra(Intent.EXTRA_SUBJECT, "Informe de Conker Recompiled");
+        intent.putExtra(Intent.EXTRA_TEXT, log);
+        startActivity(Intent.createChooser(intent, "Enviar el informe"));
     }
 
     // Helpers.
