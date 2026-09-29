@@ -1,8 +1,45 @@
+diff --git a/plume_render_interface_types.h b/plume_render_interface_types.h
+index 9dcfedf..0f4d924 100644
+--- a/plume_render_interface_types.h
++++ b/plume_render_interface_types.h
+@@ -1782,6 +1782,9 @@ namespace plume {
+ 
+         // Buffers.
+         bool bufferDeviceAddress = false;
++        // Formatted (texel) buffers of 8 and 16 bits written from shaders: optional in Vulkan, and
++        // missing on older mobile drivers.
++        bool storageTexelBuffer8And16Bit = true;
+         
+         // Samplers.
+         bool samplerMirrorClampToEdge = false;
 diff --git a/plume_vulkan.cpp b/plume_vulkan.cpp
-index f1dd503..5fa084b 100644
+index f1dd503..497ea3f 100644
 --- a/plume_vulkan.cpp
 +++ b/plume_vulkan.cpp
-@@ -1855,7 +1855,7 @@ namespace plume {
+@@ -1171,6 +1171,11 @@ namespace plume {
+             VkDescriptorSetLayoutBinding dstBinding = {};
+             dstBinding.binding = srcRange.binding;
+             dstBinding.descriptorCount = srcRange.count;
++            // A boundless range no larger than the driver allows (older mobile GPUs allow far fewer
++            // than RT64 asks for, and the set then couldn't be allocated).
++            if (descriptorSetDesc.lastRangeIsBoundless && (i == descriptorSetDesc.descriptorRangesCount - 1)) {
++                dstBinding.descriptorCount = std::min(dstBinding.descriptorCount, device->maxBoundlessDescriptors);
++            }
+             dstBinding.stageFlags = VK_SHADER_STAGE_ALL;
+             dstBinding.descriptorType = toVk(srcRange.type);
+             if (srcRange.immutableSampler != nullptr) {
+@@ -1195,7 +1200,9 @@ namespace plume {
+         
+         thread_local std::vector<VkDescriptorBindingFlags> bindingFlags;
+         VkDescriptorSetLayoutBindingFlagsCreateInfo flagsInfo = {};
+-        if (descriptorSetDesc.lastRangeIsBoundless && (descriptorSetDesc.descriptorRangesCount > 0)) {
++        // Without descriptor indexing (older mobile drivers) the boundless range is a plain one, of
++        // its full size.
++        if (descriptorSetDesc.lastRangeIsBoundless && (descriptorSetDesc.descriptorRangesCount > 0) && device->capabilities.descriptorIndexing) {
+             bindingFlags.clear();
+             bindingFlags.resize(descriptorSetDesc.descriptorRangesCount, 0);
+             bindingFlags[descriptorSetDesc.descriptorRangesCount - 1] = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
+@@ -1855,7 +1862,7 @@ namespace plume {
  
          this->descriptorSetCount = uint32_t(pipelineLayout->descriptorSetLayouts.size());
  
@@ -11,7 +48,70 @@ index f1dd503..5fa084b 100644
          if (res != VK_SUCCESS) {
              fprintf(stderr, "vkCreateRayTracingPipelinesKHR failed with error code 0x%X.\n", res);
              return;
-@@ -2073,6 +2073,35 @@ namespace plume {
+@@ -1899,6 +1906,12 @@ namespace plume {
+             boundlessRangeSize = std::max(desc.boundlessRangeSize, 1U);
+ 
+             const RenderDescriptorRange &lastDescriptorRange = desc.descriptorRanges[desc.descriptorRangesCount - 1];
++            // No more than the layout's range, which the driver's limit may have made smaller.
++            boundlessRangeSize = std::min({ boundlessRangeSize, lastDescriptorRange.count, device->maxBoundlessDescriptors });
++            // Without descriptor indexing there's no variable count: the range is always whole.
++            if (!device->capabilities.descriptorIndexing) {
++                boundlessRangeSize = std::min(lastDescriptorRange.count, device->maxBoundlessDescriptors);
++            }
+             typeCounts[toVk(lastDescriptorRange.type)] += boundlessRangeSize;
+             rangeCount--;
+         }
+@@ -1910,7 +1923,8 @@ namespace plume {
+ 
+         setLayout = new VulkanDescriptorSetLayout(device, desc);
+ 
+-        descriptorPool = createDescriptorPool(device, typeCounts, desc.lastRangeIsBoundless);
++        const bool variableCount = desc.lastRangeIsBoundless && device->capabilities.descriptorIndexing;
++        descriptorPool = createDescriptorPool(device, typeCounts, variableCount);
+         if (descriptorPool == VK_NULL_HANDLE) {
+             return;
+         }
+@@ -1922,7 +1936,7 @@ namespace plume {
+         allocateInfo.descriptorSetCount = 1;
+ 
+         VkDescriptorSetVariableDescriptorCountAllocateInfo countInfo = {};
+-        if (desc.lastRangeIsBoundless) {
++        if (variableCount) {
+             countInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
+             countInfo.pDescriptorCounts = &boundlessRangeSize;
+             countInfo.descriptorSetCount = 1;
+@@ -1934,6 +1948,8 @@ namespace plume {
+             fprintf(stderr, "vkAllocateDescriptorSets failed with error code 0x%X.\n", res);
+             return;
+         }
++
++        allocatedBoundlessCount = boundlessRangeSize;
+     }
+ 
+     VulkanDescriptorSet::~VulkanDescriptorSet() {
+@@ -2020,10 +2036,21 @@ namespace plume {
+ 
+     void VulkanDescriptorSet::setDescriptor(uint32_t descriptorIndex, const VkDescriptorBufferInfo *bufferInfo, const VkDescriptorImageInfo *imageInfo, const VkBufferView *texelBufferView, void *pNext) {
+         assert(descriptorIndex < setLayout->descriptorBindingIndices.size());
++        if ((vk == VK_NULL_HANDLE) || (descriptorIndex >= setLayout->descriptorBindingIndices.size())) {
++            return;
++        }
+ 
+         const uint32_t indexBase = setLayout->descriptorIndexBases[descriptorIndex];
+         const uint32_t bindingIndex = setLayout->descriptorBindingIndices[descriptorIndex];
+         const VkDescriptorSetLayoutBinding &setLayoutBinding = setLayout->setBindings[bindingIndex];
++        // Past what the driver's limit let the set hold (see the layout): the entry is dropped.
++        const uint32_t arrayElement = descriptorIndex - indexBase;
++        if (arrayElement >= setLayoutBinding.descriptorCount) {
++            return;
++        }
++        if ((allocatedBoundlessCount > 0) && (bindingIndex == setLayout->setBindings.size() - 1) && (arrayElement >= allocatedBoundlessCount)) {
++            return;
++        }
+         VkWriteDescriptorSet writeDescriptor = {};
+         writeDescriptor.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+         writeDescriptor.pNext = pNext;
+@@ -2073,6 +2100,35 @@ namespace plume {
  
      // VulkanSwapChain
  
@@ -47,7 +147,7 @@ index f1dd503..5fa084b 100644
      VulkanSwapChain::VulkanSwapChain(VulkanCommandQueue *commandQueue, const RenderSwapChainDesc &desc) {
          assert(commandQueue != nullptr);
          assert(desc.textureCount > 0);
-@@ -2114,6 +2143,10 @@ namespace plume {
+@@ -2114,6 +2170,10 @@ namespace plume {
              fprintf(stderr, "vkCreateAndroidSurfaceKHR failed with error code 0x%X.\n", res);
              return;
          }
@@ -58,7 +158,7 @@ index f1dd503..5fa084b 100644
  #   elif defined(__linux__)
          assert(desc.renderWindow.display != 0);
          assert(desc.renderWindow.window != 0);
-@@ -2247,6 +2280,9 @@ namespace plume {
+@@ -2247,6 +2307,9 @@ namespace plume {
          if (surface != VK_NULL_HANDLE) {
              VulkanInterface *renderInterface = commandQueue->device->renderInterface;
              vkDestroySurfaceKHR(renderInterface->instance, surface, nullptr);
@@ -68,7 +168,7 @@ index f1dd503..5fa084b 100644
          }
  
          // Remove tracking from the parent command queue.
-@@ -2310,6 +2346,12 @@ namespace plume {
+@@ -2310,6 +2373,12 @@ namespace plume {
      }
  
      bool VulkanSwapChain::resize() {
@@ -81,7 +181,7 @@ index f1dd503..5fa084b 100644
          getWindowSize(width, height);
  
          // Don't recreate the swap chain at all if the window doesn't have a valid size.
-@@ -2401,6 +2443,11 @@ namespace plume {
+@@ -2401,6 +2470,11 @@ namespace plume {
      }
  
      bool VulkanSwapChain::needsResize() const {
@@ -93,7 +193,7 @@ index f1dd503..5fa084b 100644
          uint32_t windowWidth, windowHeight;
          getWindowSize(windowWidth, windowHeight);
          return (vk == VK_NULL_HANDLE) || (windowWidth != width) || (windowHeight != height) || (requiredPresentMode != createdPresentMode);
-@@ -2501,6 +2548,56 @@ namespace plume {
+@@ -2501,6 +2575,56 @@ namespace plume {
          }
      }
  
@@ -150,7 +250,7 @@ index f1dd503..5fa084b 100644
      void VulkanSwapChain::releaseImageViews() {
          for (VulkanTexture &texture : textures) {
              if (texture.imageView != VK_NULL_HANDLE) {
-@@ -3626,17 +3723,27 @@ namespace plume {
+@@ -3626,17 +3750,27 @@ namespace plume {
          }
  
          if (res != VK_SUCCESS) {
@@ -179,7 +279,40 @@ index f1dd503..5fa084b 100644
              fprintf(stderr, "vkWaitForFences failed with error code 0x%X.\n", res);
              return;
          }
-@@ -4049,7 +4156,50 @@ namespace plume {
+@@ -3833,6 +3967,32 @@ namespace plume {
+         void *featuresChain = nullptr;
+         VkPhysicalDeviceDescriptorIndexingFeatures indexingFeatures = {};
+         const bool descriptorIndexingFound = supportedOptionalExtensions.find(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME) != supportedOptionalExtensions.end();
++
++        // How large a boundless (update after bind) range of textures can be: well under what RT64
++        // asks for on older mobile GPUs. A little is left for the other textures in the stage.
++        if (descriptorIndexingFound) {
++            VkPhysicalDeviceDescriptorIndexingProperties indexingProperties = {};
++            indexingProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES;
++            VkPhysicalDeviceProperties2 properties2 = {};
++            properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
++            properties2.pNext = &indexingProperties;
++            vkGetPhysicalDeviceProperties2(physicalDevice, &properties2);
++            uint32_t limit = std::min(indexingProperties.maxDescriptorSetUpdateAfterBindSampledImages,
++                indexingProperties.maxPerStageDescriptorUpdateAfterBindSampledImages);
++            if (limit > 0) {
++                maxBoundlessDescriptors = (limit > 64) ? (limit - 32) : limit;
++            }
++            fprintf(stderr, "Boundless textures: up to %u (driver limits: set %u, stage %u).\n", maxBoundlessDescriptors,
++                indexingProperties.maxDescriptorSetUpdateAfterBindSampledImages, indexingProperties.maxPerStageDescriptorUpdateAfterBindSampledImages);
++        }
++        else {
++            // A plain range then, under the ordinary per stage and per set limits.
++            uint32_t limit = std::min(physicalDeviceProperties.limits.maxPerStageDescriptorSampledImages,
++                physicalDeviceProperties.limits.maxDescriptorSetSampledImages);
++            maxBoundlessDescriptors = (limit > 64) ? (limit - 32) : limit;
++            fprintf(stderr, "No descriptor indexing: textures up to %u (driver limits: set %u, stage %u).\n", maxBoundlessDescriptors,
++                physicalDeviceProperties.limits.maxDescriptorSetSampledImages, physicalDeviceProperties.limits.maxPerStageDescriptorSampledImages);
++        }
+         if (descriptorIndexingFound) {
+             indexingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+             featuresChain = &indexingFeatures;
+@@ -4049,7 +4209,50 @@ namespace plume {
          createInfo.enabledExtensionCount = uint32_t(enabledExtensions.size());
          createInfo.pEnabledFeatures = &deviceFeatures.features;
  
@@ -230,11 +363,42 @@ index f1dd503..5fa084b 100644
          if (res != VK_SUCCESS) {
              fprintf(stderr, "vkCreateDevice failed with error code 0x%X.\n", res);
              return;
+@@ -4127,6 +4330,21 @@ namespace plume {
+         capabilities.resolveRegion = true;
+         capabilities.resolveModes = false;
+         capabilities.descriptorIndexing = descriptorIndexingSupported;
++        for (VkFormat format : { VK_FORMAT_R8_UINT, VK_FORMAT_R16_UINT }) {
++            VkFormatProperties formatProperties = {};
++            vkGetPhysicalDeviceFormatProperties(physicalDevice, format, &formatProperties);
++            if ((formatProperties.bufferFeatures & VK_FORMAT_FEATURE_STORAGE_TEXEL_BUFFER_BIT) == 0) {
++                capabilities.storageTexelBuffer8And16Bit = false;
++            }
++        }
++        // Older drivers (without descriptor indexing, such as Adreno 6xx on Android 11's) claim these
++        // but crashed writing them from a compute shader.
++        if (!descriptorIndexingSupported) {
++            capabilities.storageTexelBuffer8And16Bit = false;
++        }
++        if (!capabilities.storageTexelBuffer8And16Bit) {
++            fprintf(stderr, "No 8 or 16-bit storage texel buffers: framebuffer copies to and from RDRAM are skipped.\n");
++        }
+         capabilities.scalarBlockLayout = scalarBlockLayoutSupported;
+         capabilities.bufferDeviceAddress = bufferDeviceAddressSupported;
+         capabilities.samplerMirrorClampToEdge = supportedOptionalExtensions.find(VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE_EXTENSION_NAME) != supportedOptionalExtensions.end();
 diff --git a/plume_vulkan.h b/plume_vulkan.h
-index 0a1edbe..685495e 100644
+index 0a1edbe..ed4c554 100644
 --- a/plume_vulkan.h
 +++ b/plume_vulkan.h
-@@ -261,8 +261,21 @@ namespace plume {
+@@ -218,6 +218,8 @@ namespace plume {
+         void setSampler(uint32_t descriptorIndex, const RenderSampler *sampler) override;
+         void setAccelerationStructure(uint32_t descriptorIndex, const RenderAccelerationStructure *accelerationStructure) override;
+         void setDescriptor(uint32_t descriptorIndex, const VkDescriptorBufferInfo *bufferInfo, const VkDescriptorImageInfo *imageInfo, const VkBufferView *texelBufferView, void *pNext);
++        // The boundless range's entries as allocated (0 without one).
++        uint32_t allocatedBoundlessCount = 0;
+         static VkDescriptorPool createDescriptorPool(VulkanDevice *device, const std::unordered_map<VkDescriptorType, uint32_t> &typeCounts, bool lastRangeIsBoundless);
+     };
+ 
+@@ -261,8 +263,21 @@ namespace plume {
          void getWindowSize(uint32_t &dstWidth, uint32_t &dstHeight) const;
          void releaseSwapChain();
          void releaseImageViews();
@@ -256,3 +420,12 @@ index 0a1edbe..685495e 100644
      struct VulkanFramebuffer : RenderFramebuffer {
          VulkanDevice *device = nullptr;
          VkFramebuffer vk = VK_NULL_HANDLE;
+@@ -407,6 +422,8 @@ namespace plume {
+         VulkanInterface *renderInterface = nullptr;
+         VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
+         VkPhysicalDeviceProperties physicalDeviceProperties = {};
++        // The most entries a boundless (update after bind) descriptor range can have on this driver.
++        uint32_t maxBoundlessDescriptors = UINT32_MAX;
+         VmaAllocator allocator = VK_NULL_HANDLE;
+         uint32_t queueFamilyIndices[3] = {};
+         std::vector<VulkanQueueFamily> queueFamilies;

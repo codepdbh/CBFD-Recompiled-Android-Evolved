@@ -1290,6 +1290,61 @@ index 9fae0d4..b8acce6 100644
  
                          bool usesViewport = (proj.type == Projection::Type::Perspective) || (proj.type == Projection::Type::Orthographic);
                          if (usesViewport) {
+diff --git a/src/render/rt64_native_target.cpp b/src/render/rt64_native_target.cpp
+index 6891b7b..e040322 100644
+--- a/src/render/rt64_native_target.cpp
++++ b/src/render/rt64_native_target.cpp
+@@ -63,6 +63,12 @@ namespace RT64 {
+     uint32_t NativeTarget::copyFromRAM(RenderWorker *worker, FramebufferChange &emptyFbChange, uint32_t width, uint32_t height, uint32_t rowStart, uint8_t siz, uint8_t fmt, const uint8_t *data, bool invalidateTargets, const ShaderLibrary *shaderLibrary) {
+         assert(worker != nullptr);
+ 
++        // 8 and 16-bit framebuffers go through formatted buffers of their size, which some drivers
++        // (older mobile ones) can't write from shaders: skipped there, rather than crashing.
++        if ((siz != G_IM_SIZ_32b) && !worker->device->getCapabilities().storageTexelBuffer8And16Bit) {
++            return 0;
++        }
++
+         // Create the buffers for change count readback if they've not been created yet.
+         if ((changeCountBuffer == nullptr) || (changeReadbackBuffer == nullptr)) {
+             changeCountBuffer = worker->device->createBuffer(RenderBufferDesc::DefaultBuffer(sizeof(uint32_t), RenderBufferFlag::STORAGE | RenderBufferFlag::UNORDERED_ACCESS));
+@@ -234,6 +240,13 @@ namespace RT64 {
+     void NativeTarget::copyToNative(RenderWorker *worker, RenderTarget *srcTarget, uint32_t rowWidth, uint32_t rowStart, uint32_t rowEnd, uint8_t siz, uint8_t fmt, uint32_t ditherPattern, uint32_t ditherRandomSeed, const ShaderLibrary *shaderLibrary) {
+         assert(worker != nullptr);
+ 
++        // See copyFromRAM: without 8 and 16-bit formatted buffers, nothing is copied (and copyToRAM
++        // then leaves RDRAM alone).
++        copyToNativeSkipped = (siz != G_IM_SIZ_32b) && !worker->device->getCapabilities().storageTexelBuffer8And16Bit;
++        if (copyToNativeSkipped) {
++            return;
++        }
++
+         srcTarget->resolveTarget(worker, shaderLibrary);
+ 
+         if (srcTarget->fbWriteDescSet == nullptr) {
+@@ -358,6 +371,10 @@ namespace RT64 {
+     }
+ 
+     void NativeTarget::copyToRAM(uint32_t rowStart, uint32_t rowEnd, uint32_t width, uint8_t siz, uint8_t *data) {
++        if (copyToNativeSkipped || (writeBufferHistoryCount == 0)) {
++            return;
++        }
++
+         assert(writeBufferHistoryCount > 0);
+ 
+         const WriteBuffer &writeBuffer = writeBufferHistory[writeBufferHistoryIndex];
+diff --git a/src/render/rt64_native_target.h b/src/render/rt64_native_target.h
+index eb944a4..c75cea4 100644
+--- a/src/render/rt64_native_target.h
++++ b/src/render/rt64_native_target.h
+@@ -43,6 +43,8 @@ namespace RT64 {
+         std::vector<WriteBuffer> writeBufferHistory;
+         uint32_t readBufferHistoryCount = 0;
+         uint32_t writeBufferHistoryCount = 0;
++        // The last copyToNative did nothing (the driver lacks the formatted buffer it needs).
++        bool copyToNativeSkipped = false;
+         uint32_t writeBufferHistoryIndex = 0;
+ 
+         NativeTarget();
 diff --git a/src/render/rt64_projection_processor.cpp b/src/render/rt64_projection_processor.cpp
 index e842dcc..d304ec4 100644
 --- a/src/render/rt64_projection_processor.cpp

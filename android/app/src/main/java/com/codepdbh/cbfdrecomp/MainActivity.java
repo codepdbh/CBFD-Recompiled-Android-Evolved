@@ -590,18 +590,61 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** Shares the last game's log (GameLog) as text: WhatsApp, Telegram, email... */
+    // Where reports go: the developer's email, or the fork's GitHub issues.
+    private static final String REPORT_EMAIL = "danielbatuani@gmail.com";
+    private static final String REPORT_ISSUES = "https://github.com/codepdbh/CBFD-Recompiled-Android-Evolved/issues/new";
+
+    /** Sends the last game's log (GameLog): by email, as a GitHub issue, or with any app. */
     private void sendReport() {
         String log = GameLog.read(60000);
         if (log == null) {
             Toast.makeText(this, "Todavía no hay informe: juega una vez y vuelve aquí.", Toast.LENGTH_LONG).show();
             return;
         }
-        Intent intent = new Intent(Intent.ACTION_SEND);
-        intent.setType("text/plain");
-        intent.putExtra(Intent.EXTRA_SUBJECT, "Informe de Conker Recompiled");
-        intent.putExtra(Intent.EXTRA_TEXT, log);
-        startActivity(Intent.createChooser(intent, "Enviar el informe"));
+        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Enviar el informe")
+            .setMessage("El informe dice qué teléfono tienes y qué pasó en el último juego. "
+                + "No incluye tu ROM ni tus partidas.")
+            .setPositiveButton("Por correo", (d, w) -> sendReportByEmail(log))
+            .setNeutralButton("Issue en GitHub", (d, w) -> sendReportToGitHub(log))
+            .setNegativeButton("Otra app", (d, w) -> {
+                Intent intent = new Intent(Intent.ACTION_SEND);
+                intent.setType("text/plain");
+                intent.putExtra(Intent.EXTRA_SUBJECT, reportTitle());
+                intent.putExtra(Intent.EXTRA_TEXT, log);
+                startActivity(Intent.createChooser(intent, "Enviar el informe"));
+            })
+            .show();
+    }
+
+    private String reportTitle() {
+        return "Informe de Conker Recompiled: " + android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL
+            + " (" + android.os.Build.SOC_MODEL + ")";
+    }
+
+    private void sendReportByEmail(String log) {
+        Intent intent = new Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:"));
+        intent.putExtra(Intent.EXTRA_EMAIL, new String[] { REPORT_EMAIL });
+        intent.putExtra(Intent.EXTRA_SUBJECT, reportTitle());
+        intent.putExtra(Intent.EXTRA_TEXT, "Qué pasó (cuéntalo aquí):\n\n\n--- Informe ---\n" + log);
+        try {
+            startActivity(intent);
+        } catch (android.content.ActivityNotFoundException e) {
+            Toast.makeText(this, "No hay una app de correo. Escribe a " + REPORT_EMAIL, Toast.LENGTH_LONG).show();
+        }
+    }
+
+    /** A GitHub issue: the log is too long for the link, so it goes to the clipboard to paste. */
+    private void sendReportToGitHub(String log) {
+        android.content.ClipboardManager clipboard = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Informe", log));
+        String body = "**Qué pasó:**\n\n\n**Informe** (ya está copiado: mantén pulsado aquí y pega):\n\n```\n\n```\n";
+        Uri uri = Uri.parse(REPORT_ISSUES).buildUpon()
+            .appendQueryParameter("title", reportTitle())
+            .appendQueryParameter("body", body)
+            .build();
+        Toast.makeText(this, "Informe copiado: pégalo en el issue.", Toast.LENGTH_LONG).show();
+        startActivity(new Intent(Intent.ACTION_VIEW, uri));
     }
 
     // Helpers.
