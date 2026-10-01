@@ -1,3 +1,16 @@
+diff --git a/plume_render_interface.h b/plume_render_interface.h
+index 2048557..0220a99 100644
+--- a/plume_render_interface.h
++++ b/plume_render_interface.h
+@@ -57,6 +57,8 @@ namespace plume {
+ 
+     struct RenderPipeline {
+         virtual ~RenderPipeline() { }
++        // Backends with fallible pipeline construction must report native handle validity.
++        virtual bool isValid() const { return true; }
+         virtual void setName(const std::string &name) = 0;
+         virtual RenderPipelineProgram getProgram(const std::string &name) const = 0;
+     };
 diff --git a/plume_render_interface_types.h b/plume_render_interface_types.h
 index 9dcfedf..f90f896 100644
 --- a/plume_render_interface_types.h
@@ -19,10 +32,18 @@ index 9dcfedf..f90f896 100644
          // Samplers.
          bool samplerMirrorClampToEdge = false;
 diff --git a/plume_vulkan.cpp b/plume_vulkan.cpp
-index f1dd503..568b2a1 100644
+index f1dd503..f3b69be 100644
 --- a/plume_vulkan.cpp
 +++ b/plume_vulkan.cpp
-@@ -1171,6 +1171,11 @@ namespace plume {
+@@ -13,6 +13,7 @@
+ #include <algorithm>
+ #include <cmath>
+ #include <climits>
++#include <stdexcept>
+ #include <unordered_map>
+ 
+ #if DLSS_ENABLED
+@@ -1171,6 +1172,11 @@ namespace plume {
              VkDescriptorSetLayoutBinding dstBinding = {};
              dstBinding.binding = srcRange.binding;
              dstBinding.descriptorCount = srcRange.count;
@@ -34,7 +55,7 @@ index f1dd503..568b2a1 100644
              dstBinding.stageFlags = VK_SHADER_STAGE_ALL;
              dstBinding.descriptorType = toVk(srcRange.type);
              if (srcRange.immutableSampler != nullptr) {
-@@ -1195,7 +1200,9 @@ namespace plume {
+@@ -1195,7 +1201,9 @@ namespace plume {
          
          thread_local std::vector<VkDescriptorBindingFlags> bindingFlags;
          VkDescriptorSetLayoutBindingFlagsCreateInfo flagsInfo = {};
@@ -45,7 +66,7 @@ index f1dd503..568b2a1 100644
              bindingFlags.clear();
              bindingFlags.resize(descriptorSetDesc.descriptorRangesCount, 0);
              bindingFlags[descriptorSetDesc.descriptorRangesCount - 1] = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
-@@ -1282,6 +1289,110 @@ namespace plume {
+@@ -1282,6 +1290,110 @@ namespace plume {
  
      // VulkanShader
  
@@ -156,7 +177,7 @@ index f1dd503..568b2a1 100644
      VulkanShader::VulkanShader(VulkanDevice *device, const void *data, uint64_t size, const char *entryPointName, RenderShaderFormat format) {
          assert(device != nullptr);
          assert(data != nullptr);
-@@ -1297,6 +1408,15 @@ namespace plume {
+@@ -1297,6 +1409,15 @@ namespace plume {
          shaderInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
          shaderInfo.pCode = reinterpret_cast<const uint32_t *>(data);
          shaderInfo.codeSize = size;
@@ -172,7 +193,68 @@ index f1dd503..568b2a1 100644
          VkResult res = vkCreateShaderModule(device->vk, &shaderInfo, nullptr, &vk);
          if (res != VK_SUCCESS) {
              fprintf(stderr, "vkCreateShaderModule failed with error code 0x%X.\n", res);
-@@ -1855,7 +1975,7 @@ namespace plume {
+@@ -1364,6 +1485,19 @@ namespace plume {
+ 
+     VulkanPipeline::~VulkanPipeline() { }
+ 
++    bool VulkanPipeline::isValid() const {
++        switch (type) {
++        case Type::Compute:
++            return static_cast<const VulkanComputePipeline *>(this)->vk != VK_NULL_HANDLE;
++        case Type::Graphics:
++            return static_cast<const VulkanGraphicsPipeline *>(this)->vk != VK_NULL_HANDLE;
++        case Type::Raytracing:
++            return static_cast<const VulkanRaytracingPipeline *>(this)->vk != VK_NULL_HANDLE;
++        default:
++            return false;
++        }
++    }
++
+     // VulkanComputePipeline
+ 
+     VulkanComputePipeline::VulkanComputePipeline(VulkanDevice *device, const RenderComputePipelineDesc &desc) : VulkanPipeline(device, Type::Compute) {
+@@ -1371,6 +1505,12 @@ namespace plume {
+         assert(desc.pipelineLayout != nullptr);
+         assert((desc.threadGroupSizeX > 0) && (desc.threadGroupSizeY > 0) && (desc.threadGroupSizeZ > 0));
+ 
++        if ((static_cast<const VulkanShader *>(desc.computeShader)->vk == VK_NULL_HANDLE) ||
++            (static_cast<const VulkanPipelineLayout *>(desc.pipelineLayout)->vk == VK_NULL_HANDLE)) {
++            fprintf(stderr, "Vulkan: compute pipeline has an invalid shader module or layout.\n");
++            return;
++        }
++
+         std::vector<VkSpecializationMapEntry> specEntries(desc.specConstantsCount);
+         std::vector<uint32_t> specData(desc.specConstantsCount);
+         VkSpecializationInfo specInfo = {};
+@@ -1392,7 +1532,8 @@ namespace plume {
+ 
+         VkResult res = vkCreateComputePipelines(device->vk, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &vk);
+         if (res != VK_SUCCESS) {
+-            fprintf(stderr, "vkCreateComputePipelines failed with error code 0x%X.\n", res);
++            fprintf(stderr, "vkCreateComputePipelines failed: result=%d (0x%X), entry=%s, group=%ux%ux%u.\n",
++                int(res), unsigned(res), stageInfo.pName, desc.threadGroupSizeX, desc.threadGroupSizeY, desc.threadGroupSizeZ);
+             return;
+         }
+     }
+@@ -1417,6 +1558,17 @@ namespace plume {
+     VulkanGraphicsPipeline::VulkanGraphicsPipeline(VulkanDevice *device, const RenderGraphicsPipelineDesc &desc) : VulkanPipeline(device, Type::Graphics) {
+         assert(desc.pipelineLayout != nullptr);
+ 
++        if (static_cast<const VulkanPipelineLayout *>(desc.pipelineLayout)->vk == VK_NULL_HANDLE) {
++            fprintf(stderr, "Vulkan: graphics pipeline has an invalid layout.\n");
++            return;
++        }
++        for (const RenderShader *shader : { desc.vertexShader, desc.geometryShader, desc.pixelShader }) {
++            if ((shader != nullptr) && (static_cast<const VulkanShader *>(shader)->vk == VK_NULL_HANDLE)) {
++                fprintf(stderr, "Vulkan: graphics pipeline has an invalid shader module.\n");
++                return;
++            }
++        }
++
+         thread_local std::vector<VkPipelineShaderStageCreateInfo> stages;
+         stages.clear();
+ 
+@@ -1855,7 +2007,7 @@ namespace plume {
  
          this->descriptorSetCount = uint32_t(pipelineLayout->descriptorSetLayouts.size());
  
@@ -181,7 +263,7 @@ index f1dd503..568b2a1 100644
          if (res != VK_SUCCESS) {
              fprintf(stderr, "vkCreateRayTracingPipelinesKHR failed with error code 0x%X.\n", res);
              return;
-@@ -1899,7 +2019,16 @@ namespace plume {
+@@ -1899,7 +2051,16 @@ namespace plume {
              boundlessRangeSize = std::max(desc.boundlessRangeSize, 1U);
  
              const RenderDescriptorRange &lastDescriptorRange = desc.descriptorRanges[desc.descriptorRangesCount - 1];
@@ -199,7 +281,7 @@ index f1dd503..568b2a1 100644
              rangeCount--;
          }
  
-@@ -1910,7 +2039,8 @@ namespace plume {
+@@ -1910,7 +2071,8 @@ namespace plume {
  
          setLayout = new VulkanDescriptorSetLayout(device, desc);
  
@@ -209,7 +291,7 @@ index f1dd503..568b2a1 100644
          if (descriptorPool == VK_NULL_HANDLE) {
              return;
          }
-@@ -1922,7 +2052,7 @@ namespace plume {
+@@ -1922,7 +2084,7 @@ namespace plume {
          allocateInfo.descriptorSetCount = 1;
  
          VkDescriptorSetVariableDescriptorCountAllocateInfo countInfo = {};
@@ -218,7 +300,7 @@ index f1dd503..568b2a1 100644
              countInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
              countInfo.pDescriptorCounts = &boundlessRangeSize;
              countInfo.descriptorSetCount = 1;
-@@ -1934,6 +2064,8 @@ namespace plume {
+@@ -1934,6 +2096,8 @@ namespace plume {
              fprintf(stderr, "vkAllocateDescriptorSets failed with error code 0x%X.\n", res);
              return;
          }
@@ -227,7 +309,7 @@ index f1dd503..568b2a1 100644
      }
  
      VulkanDescriptorSet::~VulkanDescriptorSet() {
-@@ -2020,10 +2152,21 @@ namespace plume {
+@@ -2020,10 +2184,21 @@ namespace plume {
  
      void VulkanDescriptorSet::setDescriptor(uint32_t descriptorIndex, const VkDescriptorBufferInfo *bufferInfo, const VkDescriptorImageInfo *imageInfo, const VkBufferView *texelBufferView, void *pNext) {
          assert(descriptorIndex < setLayout->descriptorBindingIndices.size());
@@ -249,7 +331,7 @@ index f1dd503..568b2a1 100644
          VkWriteDescriptorSet writeDescriptor = {};
          writeDescriptor.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
          writeDescriptor.pNext = pNext;
-@@ -2073,6 +2216,35 @@ namespace plume {
+@@ -2073,6 +2248,35 @@ namespace plume {
  
      // VulkanSwapChain
  
@@ -285,7 +367,7 @@ index f1dd503..568b2a1 100644
      VulkanSwapChain::VulkanSwapChain(VulkanCommandQueue *commandQueue, const RenderSwapChainDesc &desc) {
          assert(commandQueue != nullptr);
          assert(desc.textureCount > 0);
-@@ -2114,6 +2286,10 @@ namespace plume {
+@@ -2114,6 +2318,10 @@ namespace plume {
              fprintf(stderr, "vkCreateAndroidSurfaceKHR failed with error code 0x%X.\n", res);
              return;
          }
@@ -296,7 +378,7 @@ index f1dd503..568b2a1 100644
  #   elif defined(__linux__)
          assert(desc.renderWindow.display != 0);
          assert(desc.renderWindow.window != 0);
-@@ -2247,6 +2423,9 @@ namespace plume {
+@@ -2247,6 +2455,9 @@ namespace plume {
          if (surface != VK_NULL_HANDLE) {
              VulkanInterface *renderInterface = commandQueue->device->renderInterface;
              vkDestroySurfaceKHR(renderInterface->instance, surface, nullptr);
@@ -306,7 +388,7 @@ index f1dd503..568b2a1 100644
          }
  
          // Remove tracking from the parent command queue.
-@@ -2310,6 +2489,12 @@ namespace plume {
+@@ -2310,6 +2521,12 @@ namespace plume {
      }
  
      bool VulkanSwapChain::resize() {
@@ -319,7 +401,7 @@ index f1dd503..568b2a1 100644
          getWindowSize(width, height);
  
          // Don't recreate the swap chain at all if the window doesn't have a valid size.
-@@ -2401,6 +2586,11 @@ namespace plume {
+@@ -2401,6 +2618,11 @@ namespace plume {
      }
  
      bool VulkanSwapChain::needsResize() const {
@@ -331,7 +413,7 @@ index f1dd503..568b2a1 100644
          uint32_t windowWidth, windowHeight;
          getWindowSize(windowWidth, windowHeight);
          return (vk == VK_NULL_HANDLE) || (windowWidth != width) || (windowHeight != height) || (requiredPresentMode != createdPresentMode);
-@@ -2501,6 +2691,56 @@ namespace plume {
+@@ -2501,6 +2723,56 @@ namespace plume {
          }
      }
  
@@ -388,7 +470,19 @@ index f1dd503..568b2a1 100644
      void VulkanSwapChain::releaseImageViews() {
          for (VulkanTexture &texture : textures) {
              if (texture.imageView != VK_NULL_HANDLE) {
-@@ -3626,17 +3866,27 @@ namespace plume {
+@@ -2940,7 +3212,10 @@ namespace plume {
+     }
+ 
+     void VulkanCommandList::setPipeline(const RenderPipeline *pipeline) {
+-        assert(pipeline != nullptr);
++        if ((pipeline == nullptr) || !pipeline->isValid()) {
++            fprintf(stderr, "Vulkan: refusing to bind an invalid pipeline.\n");
++            throw std::runtime_error("Vulkan pipeline creation failed; cannot bind pipeline");
++        }
+ 
+         const VulkanPipeline *interfacePipeline = static_cast<const VulkanPipeline *>(pipeline);
+         switch (interfacePipeline->type) {
+@@ -3626,17 +3901,27 @@ namespace plume {
          }
  
          if (res != VK_SUCCESS) {
@@ -417,40 +511,60 @@ index f1dd503..568b2a1 100644
              fprintf(stderr, "vkWaitForFences failed with error code 0x%X.\n", res);
              return;
          }
-@@ -3833,6 +4083,32 @@ namespace plume {
+@@ -3832,14 +4117,18 @@ namespace plume {
+         // Check for supported features.
          void *featuresChain = nullptr;
          VkPhysicalDeviceDescriptorIndexingFeatures indexingFeatures = {};
-         const bool descriptorIndexingFound = supportedOptionalExtensions.find(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME) != supportedOptionalExtensions.end();
+-        const bool descriptorIndexingFound = supportedOptionalExtensions.find(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME) != supportedOptionalExtensions.end();
++        const bool coreVulkan12 = physicalDeviceProperties.apiVersion >= VK_API_VERSION_1_2;
++        const bool descriptorIndexingFound = coreVulkan12 ||
++            supportedOptionalExtensions.find(VK_EXT_DESCRIPTOR_INDEXING_EXTENSION_NAME) != supportedOptionalExtensions.end();
 +
-+        // How large a boundless (update after bind) range of textures can be: well under what RT64
-+        // asks for on older mobile GPUs. A little is left for the other textures in the stage.
-+        if (descriptorIndexingFound) {
+         if (descriptorIndexingFound) {
+             indexingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
+             featuresChain = &indexingFeatures;
+         }
+ 
+         VkPhysicalDeviceScalarBlockLayoutFeatures layoutFeatures = {};
+-        const bool scalarBlockLayoutFound = supportedOptionalExtensions.find(VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME) != supportedOptionalExtensions.end();
++        const bool scalarBlockLayoutFound = coreVulkan12 ||
++            supportedOptionalExtensions.find(VK_EXT_SCALAR_BLOCK_LAYOUT_EXTENSION_NAME) != supportedOptionalExtensions.end();
+         if (scalarBlockLayoutFound) {
+             layoutFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES;
+             layoutFeatures.pNext = featuresChain;
+@@ -3932,7 +4221,30 @@ namespace plume {
+             createDeviceChain = &accelerationStructureFeatures;
+         }
+ 
+-        const bool descriptorIndexingSupported = indexingFeatures.descriptorBindingPartiallyBound && indexingFeatures.descriptorBindingVariableDescriptorCount && indexingFeatures.runtimeDescriptorArray;
++        // The texture layout uses all these features, including update-after-bind and
++        // non-uniform sampled image indexing. An extension name alone is insufficient.
++        const bool descriptorIndexingSupported = indexingFeatures.descriptorBindingPartiallyBound &&
++            indexingFeatures.descriptorBindingVariableDescriptorCount && indexingFeatures.runtimeDescriptorArray &&
++            indexingFeatures.descriptorBindingSampledImageUpdateAfterBind && indexingFeatures.shaderSampledImageArrayNonUniformIndexing;
++
++        uint32_t textureSetLimit = physicalDeviceProperties.limits.maxDescriptorSetSampledImages;
++        uint32_t textureStageLimit = physicalDeviceProperties.limits.maxPerStageDescriptorSampledImages;
++        if (descriptorIndexingSupported) {
 +            VkPhysicalDeviceDescriptorIndexingProperties indexingProperties = {};
 +            indexingProperties.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES;
 +            VkPhysicalDeviceProperties2 properties2 = {};
 +            properties2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
 +            properties2.pNext = &indexingProperties;
 +            vkGetPhysicalDeviceProperties2(physicalDevice, &properties2);
-+            uint32_t limit = std::min(indexingProperties.maxDescriptorSetUpdateAfterBindSampledImages,
-+                indexingProperties.maxPerStageDescriptorUpdateAfterBindSampledImages);
-+            if (limit > 0) {
-+                maxBoundlessDescriptors = (limit > 64) ? (limit - 32) : limit;
-+            }
-+            fprintf(stderr, "Boundless textures: up to %u (driver limits: set %u, stage %u).\n", maxBoundlessDescriptors,
-+                indexingProperties.maxDescriptorSetUpdateAfterBindSampledImages, indexingProperties.maxPerStageDescriptorUpdateAfterBindSampledImages);
++            textureSetLimit = indexingProperties.maxDescriptorSetUpdateAfterBindSampledImages;
++            textureStageLimit = indexingProperties.maxPerStageDescriptorUpdateAfterBindSampledImages;
 +        }
-+        else {
-+            // A plain range then, under the ordinary per stage and per set limits.
-+            uint32_t limit = std::min(physicalDeviceProperties.limits.maxPerStageDescriptorSampledImages,
-+                physicalDeviceProperties.limits.maxDescriptorSetSampledImages);
-+            maxBoundlessDescriptors = (limit > 64) ? (limit - 32) : limit;
-+            fprintf(stderr, "No descriptor indexing: textures up to %u (driver limits: set %u, stage %u).\n", maxBoundlessDescriptors,
-+                physicalDeviceProperties.limits.maxDescriptorSetSampledImages, physicalDeviceProperties.limits.maxPerStageDescriptorSampledImages);
-+        }
-         if (descriptorIndexingFound) {
-             indexingFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES;
-             featuresChain = &indexingFeatures;
-@@ -4049,7 +4325,50 @@ namespace plume {
++        const uint32_t textureLimit = std::min(textureSetLimit, textureStageLimit);
++        // Reserve space for the other image bindings and never exceed RT64's texture array.
++        maxBoundlessDescriptors = std::min(8192U, (textureLimit > 64) ? (textureLimit - 32) : textureLimit);
++        fprintf(stderr, "%s: textures up to %u (driver limits: set %u, stage %u).\n",
++            descriptorIndexingSupported ? "Descriptor indexing" : "No descriptor indexing",
++            maxBoundlessDescriptors, textureSetLimit, textureStageLimit);
+         if (descriptorIndexingSupported) {
+             indexingFeatures.pNext = createDeviceChain;
+             createDeviceChain = &indexingFeatures;
+@@ -4049,7 +4361,53 @@ namespace plume {
          createInfo.enabledExtensionCount = uint32_t(enabledExtensions.size());
          createInfo.pEnabledFeatures = &deviceFeatures.features;
  
@@ -476,7 +590,9 @@ index f1dd503..568b2a1 100644
 +        globalPriorityInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_GLOBAL_PRIORITY_CREATE_INFO_KHR;
 +        globalPriorityInfo.globalPriority = VK_QUEUE_GLOBAL_PRIORITY_HIGH_KHR;
 +        VkResult res = VK_ERROR_INITIALIZATION_FAILED;
-+        if (globalPriorityExtension != nullptr) {
++        // Preserve the Adreno recording workaround; use normal scheduling on Mali
++        // and other vendors rather than requesting elevated priority on every GPU.
++        if ((globalPriorityExtension != nullptr) && (physicalDeviceProperties.vendorID == 0x5143)) {
 +            std::vector<VkDeviceQueueCreateInfo> priorityQueueCreateInfos = queueCreateInfos;
 +            for (VkDeviceQueueCreateInfo &queueCreateInfo : priorityQueueCreateInfos) {
 +                queueCreateInfo.pNext = &globalPriorityInfo;
@@ -493,6 +609,7 @@ index f1dd503..568b2a1 100644
 +        }
 +
 +        if (res != VK_SUCCESS) {
++            fprintf(stderr, "Vulkan: using normal priority queues.\n");
 +            res = vkCreateDevice(physicalDevice, &createInfo, nullptr, &vk);
 +        }
 +#   else
@@ -501,7 +618,30 @@ index f1dd503..568b2a1 100644
          if (res != VK_SUCCESS) {
              fprintf(stderr, "vkCreateDevice failed with error code 0x%X.\n", res);
              return;
-@@ -4127,6 +4446,22 @@ namespace plume {
+@@ -4088,7 +4446,7 @@ namespace plume {
+         allocatorInfo.device = vk;
+         allocatorInfo.pVulkanFunctions = &vmaFunctions;
+         allocatorInfo.instance = renderInterface->instance;
+-        allocatorInfo.vulkanApiVersion = renderInterface->appInfo.apiVersion;
++        allocatorInfo.vulkanApiVersion = std::min(renderInterface->appInfo.apiVersion, physicalDeviceProperties.apiVersion);
+ 
+         res = vmaCreateAllocator(&allocatorInfo, &allocator);
+         if (res != VK_SUCCESS) {
+@@ -4120,6 +4478,13 @@ namespace plume {
+         description.dedicatedVideoMemory = memoryHeapSize;
+ 
+         // Fill capabilities.
++#   if defined(__ANDROID__)
++        fprintf(stderr, "Vulkan features: API=%u.%u.%u, driver=0x%X, scalarLayout=%u, nonUniformImages=%u, storageReadWithoutFormat=%u, storageWriteWithoutFormat=%u.\n",
++            VK_VERSION_MAJOR(physicalDeviceProperties.apiVersion), VK_VERSION_MINOR(physicalDeviceProperties.apiVersion),
++            VK_VERSION_PATCH(physicalDeviceProperties.apiVersion), physicalDeviceProperties.driverVersion,
++            unsigned(scalarBlockLayoutSupported), unsigned(indexingFeatures.shaderSampledImageArrayNonUniformIndexing),
++            deviceFeatures.features.shaderStorageImageReadWithoutFormat, deviceFeatures.features.shaderStorageImageWriteWithoutFormat);
++#   endif
+         capabilities.geometryShader = deviceFeatures.features.geometryShader;
+         capabilities.raytracing = rayTracingSupported;
+         capabilities.raytracingStateUpdate = false;
+@@ -4127,13 +4492,35 @@ namespace plume {
          capabilities.resolveRegion = true;
          capabilities.resolveModes = false;
          capabilities.descriptorIndexing = descriptorIndexingSupported;
@@ -524,11 +664,33 @@ index f1dd503..568b2a1 100644
          capabilities.scalarBlockLayout = scalarBlockLayoutSupported;
          capabilities.bufferDeviceAddress = bufferDeviceAddressSupported;
          capabilities.samplerMirrorClampToEdge = supportedOptionalExtensions.find(VK_KHR_SAMPLER_MIRROR_CLAMP_TO_EDGE_EXTENSION_NAME) != supportedOptionalExtensions.end();
+         capabilities.presentWait = presentWaitSupported;
+         capabilities.displayTiming = supportedOptionalExtensions.find(VK_GOOGLE_DISPLAY_TIMING_EXTENSION_NAME) != supportedOptionalExtensions.end();
+         capabilities.maxTextureSize = physicalDeviceProperties.limits.maxImageDimension2D;
+-        capabilities.preferHDR = memoryHeapSize > (512 * 1024 * 1024);
++        VkFormatProperties hdrFormatProperties = {};
++        vkGetPhysicalDeviceFormatProperties(physicalDevice, VK_FORMAT_R16G16B16A16_UNORM, &hdrFormatProperties);
++        const VkFormatFeatureFlags hdrFeatures = VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
++            VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT |
++            VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT;
++        capabilities.preferHDR = (memoryHeapSize > (512 * 1024 * 1024)) &&
++            ((hdrFormatProperties.optimalTilingFeatures & hdrFeatures) == hdrFeatures);
+         capabilities.dynamicDepthBias = true;
+         capabilities.queryPools = true;
+         capabilities.uma = (description.type == RenderDeviceType::INTEGRATED) && hasHostVisibleDeviceLocalMemory;
 diff --git a/plume_vulkan.h b/plume_vulkan.h
-index 0a1edbe..ed4c554 100644
+index 0a1edbe..ab4d4ee 100644
 --- a/plume_vulkan.h
 +++ b/plume_vulkan.h
-@@ -218,6 +218,8 @@ namespace plume {
+@@ -170,6 +170,7 @@ namespace plume {
+ 
+         VulkanPipeline(VulkanDevice *device, Type type);
+         virtual ~VulkanPipeline() override;
++        bool isValid() const override;
+     };
+ 
+     struct VulkanComputePipeline : VulkanPipeline {
+@@ -218,6 +219,8 @@ namespace plume {
          void setSampler(uint32_t descriptorIndex, const RenderSampler *sampler) override;
          void setAccelerationStructure(uint32_t descriptorIndex, const RenderAccelerationStructure *accelerationStructure) override;
          void setDescriptor(uint32_t descriptorIndex, const VkDescriptorBufferInfo *bufferInfo, const VkDescriptorImageInfo *imageInfo, const VkBufferView *texelBufferView, void *pNext);
@@ -537,7 +699,7 @@ index 0a1edbe..ed4c554 100644
          static VkDescriptorPool createDescriptorPool(VulkanDevice *device, const std::unordered_map<VkDescriptorType, uint32_t> &typeCounts, bool lastRangeIsBoundless);
      };
  
-@@ -261,8 +263,21 @@ namespace plume {
+@@ -261,8 +264,21 @@ namespace plume {
          void getWindowSize(uint32_t &dstWidth, uint32_t &dstHeight) const;
          void releaseSwapChain();
          void releaseImageViews();
@@ -559,7 +721,7 @@ index 0a1edbe..ed4c554 100644
      struct VulkanFramebuffer : RenderFramebuffer {
          VulkanDevice *device = nullptr;
          VkFramebuffer vk = VK_NULL_HANDLE;
-@@ -407,6 +422,8 @@ namespace plume {
+@@ -407,6 +423,8 @@ namespace plume {
          VulkanInterface *renderInterface = nullptr;
          VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
          VkPhysicalDeviceProperties physicalDeviceProperties = {};
