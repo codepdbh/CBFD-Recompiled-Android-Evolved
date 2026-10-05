@@ -31,6 +31,7 @@ namespace plume {
 #include "nfd.h"
 
 #include "librecomp/game.hpp"
+#include "librecomp/mods.hpp"
 #include "recompinput/input_events.h"
 #include "recompinput/input_state.h"
 #include "recompinput/players.h"
@@ -506,6 +507,23 @@ void conker::frontend::init(recomp::GameEntry& game) {
     recompui::register_ui_exports();
     recompinput::players::set_single_player_mode(true);
     conker::init_config();
+
+    // Texture packs: RT64's .rtz files (a zip with rt64.json), turned on and off like mods.
+    recomp::mods::ModContentType texture_pack_type{
+        .content_filename = "rt64.json",
+        .allow_runtime_toggle = true,
+        .on_enabled = +[](recomp::mods::ModContext &context, const recomp::mods::ModHandle &mod) {
+            recompui::renderer::enable_texture_pack(context, mod);
+        },
+        .on_disabled = +[](recomp::mods::ModContext &, const recomp::mods::ModHandle &mod) {
+            recompui::renderer::disable_texture_pack(mod);
+        },
+        .on_reordered = +[](recomp::mods::ModContext &) {
+            recompui::renderer::trigger_texture_pack_update();
+        },
+    };
+    recomp::mods::ModContentTypeId texture_pack_id = recomp::mods::register_mod_content_type(texture_pack_type);
+    recomp::mods::register_mod_container_type("rtz", { texture_pack_id }, false);
 }
 
 void conker::frontend::set_callbacks(recomp::Configuration& cfg) {

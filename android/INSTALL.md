@@ -76,7 +76,7 @@ Todo queda en **`Memoria interna/ConkerRecompiled/`**
 ConkerRecompiled/
 ├── rom.z64                  ← la ROM que elegiste (el juego la verifica y guarda una copia)
 ├── conker.n64.us.1.0.z64    ← la copia verificada que usa el juego
-├── mods/                    ← aquí van los mods (.nrm)
+├── mods/                    ← aquí van los mods (.nrm) y los packs de texturas (.rtz)
 ├── saves/                   ← tus partidas guardadas
 │   └── copias/              ← las "copias de partida" del menú de pausa
 ├── general.json, graphics.json, sound.json, controls.json   ← ajustes
@@ -89,10 +89,10 @@ ConkerRecompiled/
 
 ## Mods (opcional)
 
-Los mods son archivos `.nrm`. Dos formas de instalarlos:
+Los mods son archivos `.nrm`, y los packs de texturas, `.rtz`. Dos formas de instalarlos:
 
 - **Desde el juego (recomendado):** en la pantalla de inicio toca **Mods →
-  Añadir .nrm** y selecciona los archivos. Se activan solos.
+  Añadir** y selecciona los archivos. Se activan solos.
 - **A mano:** descomprime `ConkerRecompiled-Mods-vX.Y.Z.zip` y copia los `.nrm` a
   **`ConkerRecompiled/mods/`**. Luego actívalos en **Mods** en la pantalla de inicio.
 
@@ -103,6 +103,19 @@ Mods incluidos:
 - **Skip Any Cutscene:** L salta cualquier cinemática, aunque no la hayas visto antes.
 - **Cheats:** vida infinita, vidas infinitas y dinero al máximo. Cada uno se
   activa en sus opciones: menú de pausa → Menú avanzado → Mods → Configure.
+
+### Texturas HD
+
+Los packs de texturas de RT64 (`.rtz`) se instalan como cualquier mod. Los packs
+hechos para GLideN64 (un archivo `.htc`) se convierten en un PC con Python
+(`pip install pillow`):
+
+```
+python tools/htc_to_rtz.py CONKER.BFD_HIRESTEXTURES.htc conker_hires_textures.rtz --max-size 1024
+```
+
+`--max-size` reduce las texturas más grandes: los teléfonos tienen mucha menos
+memoria para texturas que un PC. Usa `--max-size 0` para dejarlas intactas.
 
 ## Controles
 

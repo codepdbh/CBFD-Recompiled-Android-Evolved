@@ -370,7 +370,8 @@ public class MainActivity extends Activity {
 
     private List<ModInfo> listMods() {
         List<ModInfo> mods = new ArrayList<>();
-        File[] files = new File(gameFolder(), "mods").listFiles((dir, name) -> name.endsWith(".nrm"));
+        // Code mods (.nrm) and texture packs (.rtz, RT64's).
+        File[] files = new File(gameFolder(), "mods").listFiles((dir, name) -> isModFile(name));
         if (files == null) {
             return mods;
         }
@@ -378,9 +379,9 @@ public class MainActivity extends Activity {
         for (File file : files) {
             ModInfo mod = new ModInfo();
             mod.file = file;
-            mod.id = file.getName().replace(".nrm", "");
+            mod.id = file.getName().substring(0, file.getName().lastIndexOf('.'));
             mod.name = mod.id;
-            mod.description = "";
+            mod.description = file.getName().endsWith(".rtz") ? "Pack de texturas" : "";
             try (ZipFile zip = new ZipFile(file)) {
                 ZipEntry entry = zip.getEntry("mod.json");
                 if (entry != null) {
@@ -397,6 +398,11 @@ public class MainActivity extends Activity {
             mods.add(mod);
         }
         return mods;
+    }
+
+    private static boolean isModFile(String name) {
+        String lower = name.toLowerCase();
+        return lower.endsWith(".nrm") || lower.endsWith(".rtz");
     }
 
     private File modsConfig() {
@@ -447,8 +453,8 @@ public class MainActivity extends Activity {
         Set<String> enabled = readEnabledMods();
         if (mods.isEmpty()) {
             TextView empty = new TextView(this);
-            empty.setText("No hay mods todavía. Añade archivos .nrm con el botón de abajo, "
-                + "o cópialos a ConkerRecompiled/mods.");
+            empty.setText("No hay mods todavía. Añade mods (.nrm) o packs de texturas (.rtz) con el botón "
+                + "de abajo, o cópialos a ConkerRecompiled/mods.");
             empty.setTextColor(Color.LTGRAY);
             list.addView(empty);
         }
@@ -485,7 +491,7 @@ public class MainActivity extends Activity {
             .setTitle("Mods")
             .setView(scroll)
             .setPositiveButton("Listo", null)
-            .setNeutralButton("Añadir .nrm", (d, w) -> pickMods())
+            .setNeutralButton("Añadir", (d, w) -> pickMods())
             .create();
         dialog.show();
     }
@@ -498,7 +504,7 @@ public class MainActivity extends Activity {
         startActivityForResult(intent, PICK_MODS);
     }
 
-    /** Copies the picked .nrm files into mods/ and turns them on. */
+    /** Copies the picked mods (.nrm) and texture packs (.rtz) into mods/ and turns them on. */
     private void importMods(List<Uri> uris) {
         busy = true;
         setButtonsEnabled(false);
@@ -508,7 +514,7 @@ public class MainActivity extends Activity {
             File modsFolder = new File(gameFolder(), "mods");
             for (Uri uri : uris) {
                 String name = displayName(uri);
-                if (name == null || !name.toLowerCase().endsWith(".nrm")) {
+                if (name == null || !isModFile(name)) {
                     failed.add(name != null ? name : uri.toString());
                     continue;
                 }
@@ -537,7 +543,7 @@ public class MainActivity extends Activity {
                 writeEnabledMods(enabled);
                 String message = count + (count == 1 ? " mod añadido" : " mods añadidos");
                 if (!failed.isEmpty()) {
-                    message += ". No son .nrm: " + String.join(", ", failed);
+                    message += ". No son .nrm ni .rtz: " + String.join(", ", failed);
                 }
                 Toast.makeText(this, message, Toast.LENGTH_LONG).show();
                 showMods();
