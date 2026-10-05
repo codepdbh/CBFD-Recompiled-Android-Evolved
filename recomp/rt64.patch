@@ -2278,7 +2278,7 @@ index e842dcc..d304ec4 100644
                  // We only interpolate the projection if the view matrix has been interpolated.
                  const bool interpolateProjection = rigidBody->lerpTranslation || rigidBody->lerpRotation;
 diff --git a/src/render/rt64_raster_shader.cpp b/src/render/rt64_raster_shader.cpp
-index 721a01e..82060b2 100644
+index 721a01e..a4a4026 100644
 --- a/src/render/rt64_raster_shader.cpp
 +++ b/src/render/rt64_raster_shader.cpp
 @@ -348,6 +348,13 @@ namespace RT64 {
@@ -2303,6 +2303,30 @@ index 721a01e..82060b2 100644
      }
  
      // RasterShaderUber
+@@ -552,6 +560,11 @@ namespace RT64 {
+ 
+         postBlendDesc.pixelShader = postBlendSubNegativePixelShader.get();
+         postBlendDitherNoiseSubNegativePipeline = device->createGraphicsPipeline(postBlendDesc);
++        for (const RenderPipeline *pipeline : { postBlendDitherNoiseAddPipeline.get(), postBlendDitherNoiseSubPipeline.get(), postBlendDitherNoiseSubNegativePipeline.get() }) {
++            if ((pipeline == nullptr) || !pipeline->isValid()) {
++                fprintf(stderr, "RT64: failed to create a post blend dither noise pipeline.\n");
++            }
++        }
+     }
+ 
+     RasterShaderUber::~RasterShaderUber() {
+@@ -581,6 +594,11 @@ namespace RT64 {
+             else {
+                 pipelines[pipelineIndex] = RasterShader::createPipeline(creation);
+             }
++
++            if ((pipelines[pipelineIndex] == nullptr) || !pipelines[pipelineIndex]->isValid()) {
++                fprintf(stderr, "RT64: failed to create ubershader pipeline %u (zCmp %d, zUpd %d, cvgAdd %d, %u samples).\n",
++                    pipelineIndex, int(creation.zCmp), int(creation.zUpd), int(creation.cvgAdd), uint32_t(creation.multisampling.sampleCount));
++            }
+         }
+     }
+ 
 diff --git a/src/render/rt64_raster_shader_cache.cpp b/src/render/rt64_raster_shader_cache.cpp
 index bf7b669..38799c9 100644
 --- a/src/render/rt64_raster_shader_cache.cpp
