@@ -43,9 +43,9 @@ public class SettingsActivity extends Activity {
 
     // Graphics presets: resolution and antialiasing (the frame rate is chosen on its own).
     private enum Preset {
-        PERFORMANCE("Fluido", "Resolución media: más fluido, menos calor y batería."),
-        BALANCED("Equilibrado", "Resolución completa. Recomendado."),
-        QUALITY("Calidad", "Resolución completa con bordes suaves (antialiasing). Exigente.");
+        PERFORMANCE("Fluido", "Resolución media (480p): lo más fluido, menos calor y batería."),
+        BALANCED("Equilibrado", "Resolución alta (hasta 960p): nítido y fluido. Recomendado."),
+        QUALITY("Calidad", "La resolución de la pantalla, con bordes suaves (antialiasing). Muy exigente.");
 
         final String label, description;
 
@@ -113,7 +113,35 @@ public class SettingsActivity extends Activity {
         }
     }
 
+    /**
+     * Balanced renders at up to 4x the N64's 240 lines (960p), not at the screen's resolution: as
+     * sharp on a phone, and less than half the GPU work at 1440p, so high frame rates hold steady.
+     * Quality keeps the screen's (this marker), which the game's own "Auto" means.
+     */
+    private static File nativeResolutionMarker() {
+        return new File(MainActivity.gameFolder(), ".android_native_resolution");
+    }
+
+    /** The resolution scale the game should use instead of the screen's, or 0 for the screen's. */
+    static int resolutionScale(int screenHeight) {
+        JSONObject json = read("graphics.json");
+        if (!json.optString("res_option", "Auto").equals("Auto") || nativeResolutionMarker().exists()) {
+            return 0;
+        }
+        int screenScale = Math.max(1, screenHeight / 240);
+        return screenScale > 4 ? 4 : 0;
+    }
+
     private static void applyPreset(JSONObject json, Preset preset) throws Exception {
+        try {
+            if (preset == Preset.QUALITY) {
+                nativeResolutionMarker().createNewFile();
+            } else {
+                nativeResolutionMarker().delete();
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Couldn't set the resolution marker", e);
+        }
         switch (preset) {
             case PERFORMANCE:
                 json.put("res_option", "Original2x");
@@ -158,7 +186,7 @@ public class SettingsActivity extends Activity {
         if (res.equals("Original2x") || res.equals("Original")) {
             return Preset.PERFORMANCE;
         }
-        if (!msaa.equals("None")) {
+        if (!msaa.equals("None") || nativeResolutionMarker().exists()) {
             return Preset.QUALITY;
         }
         return Preset.BALANCED;

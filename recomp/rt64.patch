@@ -250,6 +250,95 @@ index 1450565..032ed28 100644
 +
  #include "hlsl++.h"
 \ No newline at end of file
+diff --git a/src/common/rt64_perf_log.h b/src/common/rt64_perf_log.h
+new file mode 100644
+index 0000000..e8aa7a3
+--- /dev/null
++++ b/src/common/rt64_perf_log.h
+@@ -0,0 +1,83 @@
++//
++// RT64
++//
++
++// A line in the log every 5 seconds on how the frames go: the game's frames (workloads), the frames
++// rendered from them (more with interpolation) and presented, and the renderer's CPU and GPU time
++// per rendered frame. For players' reports of slowdowns.
++
++#pragma once
++
++#include <algorithm>
++#include <chrono>
++#include <cstdio>
++#include <mutex>
++
++namespace RT64 {
++    namespace PerfLog {
++        struct Stats {
++            std::mutex mutex;
++            std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
++            uint32_t workloads = 0;
++            uint32_t renders = 0;
++            uint32_t presents = 0;
++            double cpuSum = 0.0, cpuMax = 0.0;
++            double gpuSum = 0.0, gpuMax = 0.0;
++            double presentMax = 0.0;
++            std::chrono::steady_clock::time_point lastPresent;
++        };
++
++        inline Stats &stats() {
++            static Stats s;
++            return s;
++        }
++
++        // Prints and starts over every 5 seconds. Called with the mutex held.
++        inline void flushIfDue(Stats &s) {
++            const auto now = std::chrono::steady_clock::now();
++            const double seconds = std::chrono::duration<double>(now - s.start).count();
++            if (seconds < 5.0) {
++                return;
++            }
++
++            if (s.renders > 0) {
++                fprintf(stderr, "Perf: %.1f game fps, %.1f rendered, %.1f presented (worst %.1f ms); renderer CPU %.1f ms (worst %.1f), GPU %.1f ms (worst %.1f).\n",
++                    s.workloads / seconds, s.renders / seconds, s.presents / seconds, s.presentMax,
++                    s.cpuSum / s.renders, s.cpuMax, s.gpuSum / s.renders, s.gpuMax);
++            }
++
++            s.start = now;
++            s.workloads = s.renders = s.presents = 0;
++            s.cpuSum = s.cpuMax = s.gpuSum = s.gpuMax = s.presentMax = 0.0;
++        }
++
++        inline void workload() {
++            Stats &s = stats();
++            std::scoped_lock lock(s.mutex);
++            s.workloads++;
++        }
++
++        inline void render(double cpuMs, double gpuMs) {
++            Stats &s = stats();
++            std::scoped_lock lock(s.mutex);
++            s.renders++;
++            s.cpuSum += cpuMs;
++            s.cpuMax = std::max(s.cpuMax, cpuMs);
++            s.gpuSum += gpuMs;
++            s.gpuMax = std::max(s.gpuMax, gpuMs);
++            flushIfDue(s);
++        }
++
++        inline void present() {
++            Stats &s = stats();
++            std::scoped_lock lock(s.mutex);
++            const auto now = std::chrono::steady_clock::now();
++            if (s.lastPresent.time_since_epoch().count() != 0) {
++                s.presentMax = std::max(s.presentMax, std::chrono::duration<double, std::milli>(now - s.lastPresent).count());
++            }
++
++            s.lastPresent = now;
++            s.presents++;
++        }
++    };
++};
 diff --git a/src/common/rt64_replacement_database.cpp b/src/common/rt64_replacement_database.cpp
 index 9f331c9..38b8497 100644
 --- a/src/common/rt64_replacement_database.cpp
@@ -1211,6 +1300,26 @@ index 87392d0..fb20d9e 100644
              const std::vector<float> &curTcFloats = curWorkload.drawData.tcFloats;
              const std::vector<float> &prevTcFloats = prevWorkload.drawData.tcFloats;
              std::vector<float> &curVelFloats = curWorkload.drawData.tcVelFloats;
+diff --git a/src/hle/rt64_present_queue.cpp b/src/hle/rt64_present_queue.cpp
+index 7de5b69..33ca646 100644
+--- a/src/hle/rt64_present_queue.cpp
++++ b/src/hle/rt64_present_queue.cpp
+@@ -4,6 +4,7 @@
+ 
+ #include "rt64_present_queue.h"
+ 
++#include "common/rt64_perf_log.h"
+ #include "common/rt64_thread.h"
+ #include "rhi/rt64_render_hooks.h"
+ 
+@@ -403,6 +404,7 @@ namespace RT64 {
+                 presentTimestamp = Timer::current();
+                 swapChainValid = ext.swapChain->present(swapChainIndex, &waitSemaphore, 1);
+                 presentProfiler.logAndRestart();
++                PerfLog::present();
+             }
+         }
+     }
 diff --git a/src/hle/rt64_rdp.h b/src/hle/rt64_rdp.h
 index 84f4e7c..119d04e 100644
 --- a/src/hle/rt64_rdp.h
@@ -1731,19 +1840,29 @@ index 7a8c13b..aa2dcc2 100644
          void enableExtendedGBI(uint8_t opCode);
          void disableExtendedGBI();
 diff --git a/src/hle/rt64_workload_queue.cpp b/src/hle/rt64_workload_queue.cpp
-index 5a331aa..3d4fca2 100644
+index 5a331aa..f72760d 100644
 --- a/src/hle/rt64_workload_queue.cpp
 +++ b/src/hle/rt64_workload_queue.cpp
-@@ -4,6 +4,8 @@
+@@ -4,6 +4,9 @@
  
  #include "rt64_workload_queue.h"
  
 +#include "common/rt64_fblog.h"
++#include "common/rt64_perf_log.h"
 +
  #include "common/rt64_thread.h"
  
  #include "rt64_present_queue.h"
-@@ -449,6 +451,15 @@ namespace RT64 {
+@@ -301,6 +304,8 @@ namespace RT64 {
+         const bool usingMSAA = (targetManager.multisampling.sampleCount > 1);
+ 
+         rendererCPUProfiler.start();
++        const auto perfStart = std::chrono::steady_clock::now();
++        double perfGpuMs = 0.0;
+ 
+         const bool aspectRatioAdjustment = (abs(workloadConfig.aspectRatioScale - 1.0f) > 1e-6f);
+         const bool processProjections = aspectRatioAdjustment || prevFrame.matched|| curFrame.isDebuggerCameraEnabled(*this);
+@@ -449,6 +454,15 @@ namespace RT64 {
                          colorFb = &fbManager.get(colorImg.address, colorImg.siz, nativeColorWidth, nativeColorHeight);
                      }
  
@@ -1759,7 +1878,7 @@ index 5a331aa..3d4fca2 100644
                      if (colorFb != nullptr) {
                          fbKey.colorTargetKey = RenderTargetKey(colorFb->addressStart, colorFb->width, colorFb->siz, Framebuffer::Type::Color);
                          colorTarget = &targetManager.get(fbKey.colorTargetKey);
-@@ -508,6 +519,16 @@ namespace RT64 {
+@@ -508,6 +522,16 @@ namespace RT64 {
              colorDepthPairs.clear();
  
              const uint32_t fbPairCount = (debuggerRenderer.framebufferIndex >= 0) ? (debuggerRenderer.framebufferIndex + 1) : workload.fbPairCount;
@@ -1776,7 +1895,7 @@ index 5a331aa..3d4fca2 100644
              for (uint32_t f = 0; f < fbPairCount; f++) {
                  const FramebufferPair &fbPair = workload.fbPairs[f];
  #           if RT_ENABLED
-@@ -538,9 +559,19 @@ namespace RT64 {
+@@ -538,9 +562,19 @@ namespace RT64 {
                          depthFb->nativeTarget.resetBufferHistory();
                      }
  
@@ -1796,7 +1915,7 @@ index 5a331aa..3d4fca2 100644
                      }
  
                      // Set up the dummy target used for rendering the depth if no depth framebuffer is active.
-@@ -566,6 +597,9 @@ namespace RT64 {
+@@ -566,6 +600,9 @@ namespace RT64 {
                          if (depthTarget->resize(ext.workloadGraphicsWorker, rtWidth, rtHeight)) {
                              resizedTargets.emplace(depthTarget);
                              depthFb->readHeight = 0;
@@ -1806,7 +1925,7 @@ index 5a331aa..3d4fca2 100644
                          }
                      }
                  }
-@@ -577,6 +611,10 @@ namespace RT64 {
+@@ -577,6 +614,10 @@ namespace RT64 {
              // Make sure all depth targets are at least bigger than their corresponding color targets.
              for (auto colorDepthPair : colorDepthPairs) {
                  if (colorDepthPair.second->resize(ext.workloadGraphicsWorker, colorDepthPair.first->width, colorDepthPair.first->height)) {
@@ -1817,7 +1936,7 @@ index 5a331aa..3d4fca2 100644
                      resizedTargets.emplace(colorDepthPair.second);
                  }
              }
-@@ -709,6 +747,12 @@ namespace RT64 {
+@@ -709,6 +750,12 @@ namespace RT64 {
              for (uint32_t f = 0; f < fbPairCount; f++) {
                  const FramebufferPair &fbPair = workload.fbPairs[f];
                  bool validTargets = getTargetsFromPair(f);
@@ -1830,7 +1949,7 @@ index 5a331aa..3d4fca2 100644
                  fbManager.recordOperations(ext.workloadGraphicsWorker, &workload.fbChangePool, &workload.fbStorage, ext.shaderLibrary, ext.textureCache,
                      fbPair.startFbOperations, targetManager, fixedResScale, f, workload.submissionFrame);
  
-@@ -738,6 +782,11 @@ namespace RT64 {
+@@ -738,6 +785,11 @@ namespace RT64 {
  
                          if (colorFb->height > colorFb->readHeight) {
                              uint32_t readRowCount = colorFb->height - colorFb->readHeight;
@@ -1842,7 +1961,7 @@ index 5a331aa..3d4fca2 100644
                              FramebufferChange *colorFbChange = colorFb->readChangeFromStorage(ext.workloadGraphicsWorker, workload.fbStorage, scratchFbChangePool,
                                  Framebuffer::Type::Color, colorImg.fmt, f, colorFb->readHeight, readRowCount, ext.shaderLibrary);
  
-@@ -756,10 +805,20 @@ namespace RT64 {
+@@ -756,10 +808,20 @@ namespace RT64 {
                          depthFbTypeChanged = (depthFb->lastWriteType == Framebuffer::Type::Color);
  
                          bool imgFormatChanged = (colorFb == nullptr) ? colorImg.formatChanged : depthImg.formatChanged;
@@ -1863,7 +1982,7 @@ index 5a331aa..3d4fca2 100644
                              RenderTargetKey otherDepthTargetKey(depthFb->addressStart, depthFb->width, depthFb->siz, depthFb->lastWriteType);
                              RenderTarget &otherDepthTarget = targetManager.get(otherDepthTargetKey);
                              if (!otherDepthTarget.isEmpty()) {
-@@ -777,6 +836,10 @@ namespace RT64 {
+@@ -777,6 +839,10 @@ namespace RT64 {
  
                          if (depthFb->height > depthFb->readHeight) {
                              uint32_t readRowCount = depthFb->height - depthFb->readHeight;
@@ -1874,6 +1993,32 @@ index 5a331aa..3d4fca2 100644
                              FramebufferChange *depthFbChange = depthFb->readChangeFromStorage(ext.workloadGraphicsWorker, workload.fbStorage, scratchFbChangePool, Framebuffer::Type::Depth,
                                  G_IM_FMT_DEPTH, f, depthFb->readHeight, readRowCount, ext.shaderLibrary);
  
+@@ -847,7 +913,8 @@ namespace RT64 {
+             // Update the GPU profiler with the results from the timestamps of the frame.
+             queryPool->queryResults();
+             const uint64_t *frameTimestamps = queryPool->getResults();
+-            rendererGPUProfiler.log(double(frameTimestamps[1] - frameTimestamps[0]) / 1000000.0);
++            perfGpuMs = double(frameTimestamps[1] - frameTimestamps[0]) / 1000000.0;
++            rendererGPUProfiler.log(perfGpuMs);
+ 
+             // Indicate to the texture cache it's safe to delete the textures if no locks are active.
+             ext.textureCache->decrementLock();
+@@ -861,6 +928,7 @@ namespace RT64 {
+         rendererCPUProfiler.end();
+         rendererCPUProfiler.log();
+         rendererCPUProfiler.reset();
++        PerfLog::render(std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - perfStart).count(), perfGpuMs);
+ #   endif
+     }
+ 
+@@ -912,6 +980,7 @@ namespace RT64 {
+ 
+                 ElapsedTimer workloadTimer;
+                 workloadProfiler.start();
++                PerfLog::workload();
+                 threadConfigurationUpdate(workload.viFbSize, workloadConfig);
+ 
+                 // FIXME: This is a very hacky way to find out if we need to advance the frame if the workload was paused for the first time.
 diff --git a/src/render/rt64_framebuffer_renderer.cpp b/src/render/rt64_framebuffer_renderer.cpp
 index 9fae0d4..bc9f114 100644
 --- a/src/render/rt64_framebuffer_renderer.cpp

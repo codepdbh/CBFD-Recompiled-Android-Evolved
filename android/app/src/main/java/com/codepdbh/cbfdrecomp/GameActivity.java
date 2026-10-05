@@ -33,6 +33,14 @@ public class GameActivity extends SDLActivity {
     protected void onCreate(Bundle savedInstanceState) {
         // The log players can send (GameLog), before the game's library starts writing to it.
         GameLog.begin(this);
+        // The Balanced preset's resolution (SettingsActivity.resolutionScale), read by the renderer.
+        try {
+            android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
+            int scale = SettingsActivity.resolutionScale(Math.min(metrics.widthPixels, metrics.heightPixels));
+            android.system.Os.setenv("CONKER_RES_SCALE", Integer.toString(scale), true);
+        } catch (Exception e) {
+            // The screen's resolution then.
+        }
         super.onCreate(savedInstanceState);
         // Draw under the camera cutout too: the game fills the whole screen.
         getWindow().getAttributes().layoutInDisplayCutoutMode =

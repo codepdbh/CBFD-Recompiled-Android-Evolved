@@ -60,7 +60,7 @@ index 296ce0e..5e0b7fd 100644
  
          return config;
 diff --git a/recompui/src/renderer/rt64_render_context.cpp b/recompui/src/renderer/rt64_render_context.cpp
-index a7954c7..54fb135 100644
+index a7954c7..4a29a2b 100644
 --- a/recompui/src/renderer/rt64_render_context.cpp
 +++ b/recompui/src/renderer/rt64_render_context.cpp
 @@ -15,6 +15,10 @@
@@ -74,7 +74,21 @@ index a7954c7..54fb135 100644
  using namespace recompui;
  
  static RT64::UserConfiguration::Antialiasing device_max_msaa = RT64::UserConfiguration::Antialiasing::None;
-@@ -225,7 +229,13 @@ renderer::RT64Context::RT64Context(uint8_t* rdram, ultramodern::renderer::Window
+@@ -144,6 +148,13 @@ void set_application_user_config(RT64::Application* application, const ultramode
+         case ultramodern::renderer::Resolution::Auto:
+             application->userConfig.resolution = RT64::UserConfiguration::Resolution::WindowIntegerScale;
+             application->userConfig.downsampleMultiplier = 1;
++#if defined(__ANDROID__)
++            // The launcher's Balanced preset: a fixed scale below the screen's (see SettingsActivity).
++            if (const char *scale = getenv("CONKER_RES_SCALE"); (scale != nullptr) && (atoi(scale) > 0)) {
++                application->userConfig.resolution = RT64::UserConfiguration::Resolution::Manual;
++                application->userConfig.resolutionMultiplier = atoi(scale);
++            }
++#endif
+             break;
+         case ultramodern::renderer::Resolution::Original:
+             application->userConfig.resolution = RT64::UserConfiguration::Resolution::Manual;
+@@ -225,7 +236,13 @@ renderer::RT64Context::RT64Context(uint8_t* rdram, ultramodern::renderer::Window
      RT64::Application::Core appCore{};
  #if defined(_WIN32)
      appCore.window = window_handle.window;
