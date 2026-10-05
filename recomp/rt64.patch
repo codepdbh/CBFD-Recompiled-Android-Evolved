@@ -1,5 +1,5 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 79dfc38..03f8872 100644
+index 79dfc38..6f43335 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -69,9 +69,34 @@ set(ZSTD_LEGACY_SUPPORT OFF)
@@ -113,6 +113,20 @@ index 79dfc38..03f8872 100644
  
  # Add any Apple-specific source files and libraries
  if (APPLE)
+@@ -504,6 +534,13 @@ build_pixel_shader_spec_constants(rt64 "src/shaders/RasterPS.hlsl" "src/shaders/
+ build_pixel_shader_spec_constants(rt64 "src/shaders/RasterPS.hlsl" "src/shaders/RasterPSSpecConstantMS.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D MULTISAMPLING")
+ build_pixel_shader_spec_constants(rt64 "src/shaders/RasterPS.hlsl" "src/shaders/RasterPSSpecConstantFlat.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D VERTEX_FLAT_COLOR")
+ build_pixel_shader_spec_constants(rt64 "src/shaders/RasterPS.hlsl" "src/shaders/RasterPSSpecConstantFlatMS.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D VERTEX_FLAT_COLOR" "-D MULTISAMPLING")
++# Without dual source blending (older Mali GPUs): SPIR-V only.
++build_pixel_shader_spec_constants(rt64 "src/shaders/RasterPS.hlsl" "src/shaders/RasterPSDynamicND.hlsl" "-D DYNAMIC_RENDER_PARAMS" "-D NO_DUAL_SOURCE")
++build_pixel_shader_spec_constants(rt64 "src/shaders/RasterPS.hlsl" "src/shaders/RasterPSDynamicMSND.hlsl" "-D DYNAMIC_RENDER_PARAMS" "-D MULTISAMPLING" "-D NO_DUAL_SOURCE")
++build_pixel_shader_spec_constants(rt64 "src/shaders/RasterPS.hlsl" "src/shaders/RasterPSSpecConstantND.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D NO_DUAL_SOURCE")
++build_pixel_shader_spec_constants(rt64 "src/shaders/RasterPS.hlsl" "src/shaders/RasterPSSpecConstantMSND.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D MULTISAMPLING" "-D NO_DUAL_SOURCE")
++build_pixel_shader_spec_constants(rt64 "src/shaders/RasterPS.hlsl" "src/shaders/RasterPSSpecConstantFlatND.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D VERTEX_FLAT_COLOR" "-D NO_DUAL_SOURCE")
++build_pixel_shader_spec_constants(rt64 "src/shaders/RasterPS.hlsl" "src/shaders/RasterPSSpecConstantFlatMSND.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D VERTEX_FLAT_COLOR" "-D MULTISAMPLING" "-D NO_DUAL_SOURCE")
+ build_vertex_shader( rt64 "src/shaders/RasterVS.hlsl" "src/shaders/RasterVSDynamic.hlsl" "-D DYNAMIC_RENDER_PARAMS")
+ build_vertex_shader_spec_constants( rt64 "src/shaders/RasterVS.hlsl" "src/shaders/RasterVSSpecConstant.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS")
+ build_vertex_shader_spec_constants( rt64 "src/shaders/RasterVS.hlsl" "src/shaders/RasterVSSpecConstantFlat.hlsl" "-D SPEC_CONSTANT_RENDER_PARAMS" "-D VERTEX_FLAT_COLOR")
 diff --git a/include/rt64_extended_gbi.h b/include/rt64_extended_gbi.h
 index d387090..75ab87d 100644
 --- a/include/rt64_extended_gbi.h
@@ -2423,10 +2437,66 @@ index e842dcc..d304ec4 100644
                  // We only interpolate the projection if the view matrix has been interpolated.
                  const bool interpolateProjection = rigidBody->lerpTranslation || rigidBody->lerpRotation;
 diff --git a/src/render/rt64_raster_shader.cpp b/src/render/rt64_raster_shader.cpp
-index 721a01e..a4a4026 100644
+index 721a01e..13db65a 100644
 --- a/src/render/rt64_raster_shader.cpp
 +++ b/src/render/rt64_raster_shader.cpp
-@@ -348,6 +348,13 @@ namespace RT64 {
+@@ -13,6 +13,12 @@
+ #include "shaders/RasterPSSpecConstantMS.hlsl.spirv.h"
+ #include "shaders/RasterPSSpecConstantFlat.hlsl.spirv.h"
+ #include "shaders/RasterPSSpecConstantFlatMS.hlsl.spirv.h"
++#include "shaders/RasterPSDynamicND.hlsl.spirv.h"
++#include "shaders/RasterPSDynamicMSND.hlsl.spirv.h"
++#include "shaders/RasterPSSpecConstantND.hlsl.spirv.h"
++#include "shaders/RasterPSSpecConstantMSND.hlsl.spirv.h"
++#include "shaders/RasterPSSpecConstantFlatND.hlsl.spirv.h"
++#include "shaders/RasterPSSpecConstantFlatMSND.hlsl.spirv.h"
+ #include "shaders/RasterVSDynamic.hlsl.spirv.h"
+ #include "shaders/RasterVSSpecConstant.hlsl.spirv.h"
+ #include "shaders/RasterVSSpecConstantFlat.hlsl.spirv.h"
+@@ -67,13 +73,21 @@ namespace RT64 {
+ 
+     // OptimizerCacheSPIRV
+ 
+-    void OptimizerCacheSPIRV::initialize() {
++    void OptimizerCacheSPIRV::initialize(bool dualSourceBlending) {
+         rasterVS.parse(RasterVSSpecConstantBlobSPIRV, std::size(RasterVSSpecConstantBlobSPIRV));
+         rasterVSFlat.parse(RasterVSSpecConstantFlatBlobSPIRV, std::size(RasterVSSpecConstantFlatBlobSPIRV));
+-        rasterPS.parse(RasterPSSpecConstantBlobSPIRV, std::size(RasterPSSpecConstantBlobSPIRV));
+-        rasterPSMS.parse(RasterPSSpecConstantMSBlobSPIRV, std::size(RasterPSSpecConstantMSBlobSPIRV));
+-        rasterPSFlat.parse(RasterPSSpecConstantFlatBlobSPIRV, std::size(RasterPSSpecConstantFlatBlobSPIRV));
+-        rasterPSFlatMS.parse(RasterPSSpecConstantFlatMSBlobSPIRV, std::size(RasterPSSpecConstantFlatMSBlobSPIRV));
++        if (dualSourceBlending) {
++            rasterPS.parse(RasterPSSpecConstantBlobSPIRV, std::size(RasterPSSpecConstantBlobSPIRV));
++            rasterPSMS.parse(RasterPSSpecConstantMSBlobSPIRV, std::size(RasterPSSpecConstantMSBlobSPIRV));
++            rasterPSFlat.parse(RasterPSSpecConstantFlatBlobSPIRV, std::size(RasterPSSpecConstantFlatBlobSPIRV));
++            rasterPSFlatMS.parse(RasterPSSpecConstantFlatMSBlobSPIRV, std::size(RasterPSSpecConstantFlatMSBlobSPIRV));
++        }
++        else {
++            rasterPS.parse(RasterPSSpecConstantNDBlobSPIRV, std::size(RasterPSSpecConstantNDBlobSPIRV));
++            rasterPSMS.parse(RasterPSSpecConstantMSNDBlobSPIRV, std::size(RasterPSSpecConstantMSNDBlobSPIRV));
++            rasterPSFlat.parse(RasterPSSpecConstantFlatNDBlobSPIRV, std::size(RasterPSSpecConstantFlatNDBlobSPIRV));
++            rasterPSFlatMS.parse(RasterPSSpecConstantFlatMSNDBlobSPIRV, std::size(RasterPSSpecConstantFlatMSNDBlobSPIRV));
++        }
+         assert(!rasterVS.empty());
+         assert(!rasterVSFlat.empty());
+         assert(!rasterPS.empty());
+@@ -330,11 +344,13 @@ namespace RT64 {
+         pipelineDesc.specConstantsCount = uint32_t(c.specConstants.size());
+ 
+         // Alpha blending is performed by using dual source blending. The blending factor will be in the secondary output.
++        // Without it (older Mali GPUs), the shaders put the factor in the main output's alpha instead.
+         RenderBlendDesc &targetBlend = pipelineDesc.renderTargetBlend[0];
+         if (c.alphaBlend) {
++            const bool dualSource = c.device->getCapabilities().dualSourceBlending;
+             targetBlend.blendEnabled = true;
+-            targetBlend.srcBlend = RenderBlend::SRC1_ALPHA;
+-            targetBlend.dstBlend = RenderBlend::INV_SRC1_ALPHA;
++            targetBlend.srcBlend = dualSource ? RenderBlend::SRC1_ALPHA : RenderBlend::SRC_ALPHA;
++            targetBlend.dstBlend = dualSource ? RenderBlend::INV_SRC1_ALPHA : RenderBlend::INV_SRC_ALPHA;
+             targetBlend.blendOp = RenderBlendOperation::ADD;
+         }
+ 
+@@ -348,6 +364,13 @@ namespace RT64 {
      }
      
      RenderMultisampling RasterShader::generateMultisamplingPattern(RenderSampleCounts sampleCount, bool sampleLocationsSupported) {
@@ -2440,7 +2510,7 @@ index 721a01e..a4a4026 100644
  #   if SAMPLE_LOCATIONS_REQUIRED
          if (!sampleLocationsSupported) {
              return RenderMultisampling();
-@@ -391,6 +398,7 @@ namespace RT64 {
+@@ -391,6 +414,7 @@ namespace RT64 {
          }
  
          return multisampling;
@@ -2448,7 +2518,25 @@ index 721a01e..a4a4026 100644
      }
  
      // RasterShaderUber
-@@ -552,6 +560,11 @@ namespace RT64 {
+@@ -424,9 +448,15 @@ namespace RT64 {
+ #   endif
+         case RenderShaderFormat::SPIRV:
+             VSBlob = RasterVSDynamicBlobSPIRV;
+-            PSBlob = useMSAA ? RasterPSDynamicMSBlobSPIRV : RasterPSDynamicBlobSPIRV;
+             VSBlobSize = uint32_t(std::size(RasterVSDynamicBlobSPIRV));
+-            PSBlobSize = uint32_t(useMSAA ? std::size(RasterPSDynamicMSBlobSPIRV) : std::size(RasterPSDynamicBlobSPIRV));
++            if (device->getCapabilities().dualSourceBlending) {
++                PSBlob = useMSAA ? RasterPSDynamicMSBlobSPIRV : RasterPSDynamicBlobSPIRV;
++                PSBlobSize = uint32_t(useMSAA ? std::size(RasterPSDynamicMSBlobSPIRV) : std::size(RasterPSDynamicBlobSPIRV));
++            }
++            else {
++                PSBlob = useMSAA ? RasterPSDynamicMSNDBlobSPIRV : RasterPSDynamicNDBlobSPIRV;
++                PSBlobSize = uint32_t(useMSAA ? std::size(RasterPSDynamicMSNDBlobSPIRV) : std::size(RasterPSDynamicNDBlobSPIRV));
++            }
+             break;
+ #   ifdef __APPLE__
+         case RenderShaderFormat::METAL:
+@@ -552,6 +582,11 @@ namespace RT64 {
  
          postBlendDesc.pixelShader = postBlendSubNegativePixelShader.get();
          postBlendDitherNoiseSubNegativePipeline = device->createGraphicsPipeline(postBlendDesc);
@@ -2460,7 +2548,7 @@ index 721a01e..a4a4026 100644
      }
  
      RasterShaderUber::~RasterShaderUber() {
-@@ -581,6 +594,11 @@ namespace RT64 {
+@@ -581,6 +616,11 @@ namespace RT64 {
              else {
                  pipelines[pipelineIndex] = RasterShader::createPipeline(creation);
              }
@@ -2472,8 +2560,21 @@ index 721a01e..a4a4026 100644
          }
      }
  
+diff --git a/src/render/rt64_raster_shader.h b/src/render/rt64_raster_shader.h
+index 3b991ff..76e3827 100644
+--- a/src/render/rt64_raster_shader.h
++++ b/src/render/rt64_raster_shader.h
+@@ -36,7 +36,7 @@ namespace RT64 {
+         respv::Shader rasterPSFlat;
+         respv::Shader rasterPSFlatMS;
+ 
+-        void initialize();
++        void initialize(bool dualSourceBlending);
+     };
+ 
+     struct PipelineCreation {
 diff --git a/src/render/rt64_raster_shader_cache.cpp b/src/render/rt64_raster_shader_cache.cpp
-index bf7b669..38799c9 100644
+index bf7b669..78a5e1c 100644
 --- a/src/render/rt64_raster_shader_cache.cpp
 +++ b/src/render/rt64_raster_shader_cache.cpp
 @@ -31,7 +31,10 @@ namespace RT64 {
@@ -2496,6 +2597,15 @@ index bf7b669..38799c9 100644
              }
          }
      }
+@@ -107,7 +112,7 @@ namespace RT64 {
+ 
+         // Initialize the re-spirv optimizer cache.
+         if (shaderFormat == RenderShaderFormat::SPIRV) {
+-            optimizerCacheSPIRV.initialize();
++            optimizerCacheSPIRV.initialize(device->getCapabilities().dualSourceBlending);
+         }
+     }
+ 
 @@ -171,6 +176,23 @@ namespace RT64 {
          return shaderIt->second.get();
      }
@@ -3353,6 +3463,47 @@ index 9131697..44d517a 100644
          bool useTexture(uint64_t hash, uint64_t submissionFrame, uint32_t &textureIndex, interop::float2 &textureScale, interop::float3 &textureDimensions, bool &textureReplaced, bool &hasMipmaps, bool &shiftedByHalf);
          bool useTexture(uint64_t hash, uint64_t submissionFrame, uint32_t &textureIndex);
          bool addReplacement(uint64_t hash, const std::string &relativePath, ReplacementShift shift);
+diff --git a/src/shaders/RasterPS.hlsl b/src/shaders/RasterPS.hlsl
+index e7895c3..ce579ff 100644
+--- a/src/shaders/RasterPS.hlsl
++++ b/src/shaders/RasterPS.hlsl
+@@ -237,6 +237,13 @@ LIBRARY_EXPORT bool RasterPS(const RenderParams rp, float4 vertexPosition, float
+         resultAlpha.a = resultColor.a;
+     }
+     
++#if defined(NO_DUAL_SOURCE)
++    // Without dual source blending (older Mali), alpha blending takes its factor from the main
++    // output's alpha, so it can't hold coverage then.
++    if (alphaBlend) {
++    }
++    else
++#endif
+     // Preserve the value in the destination.
+     if (otherMode.cvgDst() == CVG_DST_SAVE) {
+         resultColor.a = 0.0f;
+@@ -290,8 +297,12 @@ void PSMain(
+ #if defined(DYNAMIC_RENDER_PARAMS)
+     , bool isFrontFace : SV_IsFrontFace
+ #endif
++#if defined(NO_DUAL_SOURCE)
++    , [[vk::location(0)]] out float4 pixelColor : SV_TARGET0
++#else
+     , [[vk::location(0)]] [[vk::index(0)]] out float4 pixelColor : SV_TARGET0
+     , [[vk::location(0)]] [[vk::index(1)]] out float4 pixelAlpha : SV_TARGET1
++#endif
+ )
+ {
+ #if !defined(DYNAMIC_RENDER_PARAMS)
+@@ -308,6 +319,8 @@ void PSMain(
+     }
+ 
+     pixelColor = resultColor;
++#if !defined(NO_DUAL_SOURCE)
+     pixelAlpha = resultAlpha;
++#endif
+ }
+ #endif
+\ No newline at end of file
 diff --git a/src/tools/file_to_c/file_to_c.cmake b/src/tools/file_to_c/file_to_c.cmake
 new file mode 100644
 index 0000000..ea68014

@@ -12,10 +12,18 @@ index 2048557..0220a99 100644
          virtual RenderPipelineProgram getProgram(const std::string &name) const = 0;
      };
 diff --git a/plume_render_interface_types.h b/plume_render_interface_types.h
-index 9dcfedf..f90f896 100644
+index 9dcfedf..1bbde84 100644
 --- a/plume_render_interface_types.h
 +++ b/plume_render_interface_types.h
-@@ -1778,10 +1778,15 @@ namespace plume {
+@@ -1764,6 +1764,7 @@ namespace plume {
+     struct RenderDeviceCapabilities {
+         // Geometry shaders.
+         bool geometryShader = false;
++        bool dualSourceBlending = true;
+ 
+         // Raytracing.
+         bool raytracing = false;
+@@ -1778,10 +1779,15 @@ namespace plume {
  
          // Bindless resources.
          bool descriptorIndexing = false;
@@ -32,7 +40,7 @@ index 9dcfedf..f90f896 100644
          // Samplers.
          bool samplerMirrorClampToEdge = false;
 diff --git a/plume_vulkan.cpp b/plume_vulkan.cpp
-index f1dd503..dcaf980 100644
+index f1dd503..6f72112 100644
 --- a/plume_vulkan.cpp
 +++ b/plume_vulkan.cpp
 @@ -13,6 +13,7 @@
@@ -721,7 +729,7 @@ index f1dd503..dcaf980 100644
  
          res = vmaCreateAllocator(&allocatorInfo, &allocator);
          if (res != VK_SUCCESS) {
-@@ -4120,20 +4537,54 @@ namespace plume {
+@@ -4120,20 +4537,58 @@ namespace plume {
          description.dedicatedVideoMemory = memoryHeapSize;
  
          // Fill capabilities.
@@ -734,6 +742,10 @@ index f1dd503..dcaf980 100644
 +            deviceFeatures.features.dualSrcBlend);
 +#   endif
          capabilities.geometryShader = deviceFeatures.features.geometryShader;
++        capabilities.dualSourceBlending = deviceFeatures.features.dualSrcBlend;
++        if (!capabilities.dualSourceBlending) {
++            fprintf(stderr, "No dual source blending: alpha blending takes its factor from the color's alpha.\n");
++        }
          capabilities.raytracing = rayTracingSupported;
          capabilities.raytracingStateUpdate = false;
          capabilities.sampleLocations = (sampleLocationProperties.sampleLocationSampleCounts != 0);
