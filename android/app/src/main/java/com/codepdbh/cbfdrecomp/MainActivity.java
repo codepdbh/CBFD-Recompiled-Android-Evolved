@@ -601,31 +601,46 @@ public class MainActivity extends Activity {
             Toast.makeText(this, "Todavía no hay informe: juega una vez y vuelve aquí.", Toast.LENGTH_LONG).show();
             return;
         }
+        // A log from before an update says nothing about the version installed now.
+        String logVersion = GameLog.versionOf(log);
+        String installed = GameLog.version(this);
+        if (logVersion != null && !logVersion.equals(installed)) {
+            new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("Informe de una versión anterior")
+                .setMessage("El último informe es de la versión " + logVersion + ", y tienes instalada la "
+                    + installed + ". Juega una vez con esta versión y envía ese informe: el antiguo ya no sirve.")
+                .setPositiveButton("Jugar", (d, w) -> startGame())
+                .setNegativeButton("Cancelar", null)
+                .show();
+            return;
+        }
+        String version = logVersion != null ? logVersion : installed;
         new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
             .setTitle("Enviar el informe")
             .setMessage("El informe dice qué teléfono tienes y qué pasó en el último juego. "
                 + "No incluye tu ROM ni tus partidas.")
-            .setPositiveButton("Por correo", (d, w) -> sendReportByEmail(log))
-            .setNeutralButton("Issue en GitHub", (d, w) -> sendReportToGitHub(log))
+            .setPositiveButton("Por correo", (d, w) -> sendReportByEmail(log, version))
+            .setNeutralButton("Issue en GitHub", (d, w) -> sendReportToGitHub(log, version))
             .setNegativeButton("Otra app", (d, w) -> {
                 Intent intent = new Intent(Intent.ACTION_SEND);
                 intent.setType("text/plain");
-                intent.putExtra(Intent.EXTRA_SUBJECT, reportTitle());
+                intent.putExtra(Intent.EXTRA_SUBJECT, reportTitle(version));
                 intent.putExtra(Intent.EXTRA_TEXT, log);
                 startActivity(Intent.createChooser(intent, "Enviar el informe"));
             })
             .show();
     }
 
-    private String reportTitle() {
-        return "Informe de Conker Recompiled: " + android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL
+    /** The version first, so reports from old versions are told apart at a glance. */
+    private String reportTitle(String version) {
+        return "[v" + version + "] Informe de Conker Recompiled: " + android.os.Build.MANUFACTURER + " " + android.os.Build.MODEL
             + " (" + android.os.Build.SOC_MODEL + ")";
     }
 
-    private void sendReportByEmail(String log) {
+    private void sendReportByEmail(String log, String version) {
         Intent intent = new Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:"));
         intent.putExtra(Intent.EXTRA_EMAIL, new String[] { REPORT_EMAIL });
-        intent.putExtra(Intent.EXTRA_SUBJECT, reportTitle());
+        intent.putExtra(Intent.EXTRA_SUBJECT, reportTitle(version));
         intent.putExtra(Intent.EXTRA_TEXT, "Qué pasó (cuéntalo aquí):\n\n\n--- Informe ---\n" + log);
         try {
             startActivity(intent);
@@ -635,12 +650,12 @@ public class MainActivity extends Activity {
     }
 
     /** A GitHub issue: the log is too long for the link, so it goes to the clipboard to paste. */
-    private void sendReportToGitHub(String log) {
+    private void sendReportToGitHub(String log, String version) {
         android.content.ClipboardManager clipboard = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
         clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Informe", log));
         String body = "**Qué pasó:**\n\n\n**Informe** (ya está copiado: mantén pulsado aquí y pega):\n\n```\n\n```\n";
         Uri uri = Uri.parse(REPORT_ISSUES).buildUpon()
-            .appendQueryParameter("title", reportTitle())
+            .appendQueryParameter("title", reportTitle(version))
             .appendQueryParameter("body", body)
             .build();
         Toast.makeText(this, "Informe copiado: pégalo en el issue.", Toast.LENGTH_LONG).show();

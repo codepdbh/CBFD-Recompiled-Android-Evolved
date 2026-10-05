@@ -33,14 +33,7 @@ final class GameLog {
     static void begin(Context context) {
         File file = file();
         file.getParentFile().mkdirs();
-        String version = "?";
-        try {
-            PackageInfo info = context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
-            version = info.versionName + " (" + info.getLongVersionCode() + ")";
-        } catch (Exception e) {
-            // Not needed.
-        }
-        String header = "Conker Recompiled " + version + " — " + DateFormat.getDateTimeInstance().format(new Date()) + "\n"
+        String header = "Conker Recompiled " + version(context) + " — " + DateFormat.getDateTimeInstance().format(new Date()) + "\n"
             + "Device: " + Build.MANUFACTURER + " " + Build.MODEL + " (" + Build.DEVICE + ")\n"
             + "SoC: " + Build.SOC_MANUFACTURER + " " + Build.SOC_MODEL + ", hardware " + Build.HARDWARE + "\n"
             + "Android " + Build.VERSION.RELEASE + " (API " + Build.VERSION.SDK_INT + "), "
@@ -67,6 +60,26 @@ final class GameLog {
                 previous.uncaughtException(thread, error);
             }
         });
+    }
+
+    /** The installed app's version, as logs give it: "0.2.8 (102)". */
+    static String version(Context context) {
+        try {
+            PackageInfo info = context.getPackageManager().getPackageInfo(context.getPackageName(), 0);
+            return info.versionName + " (" + info.getLongVersionCode() + ")";
+        } catch (Exception e) {
+            return "?";
+        }
+    }
+
+    /** The version of the app that wrote a log (its first line), or null if it doesn't say. */
+    static String versionOf(String log) {
+        String prefix = "Conker Recompiled ";
+        int end = log.indexOf(" — ");
+        if (!log.startsWith(prefix) || end < 0 || end > 80) {
+            return null;
+        }
+        return log.substring(prefix.length(), end);
     }
 
     static void append(String text) {

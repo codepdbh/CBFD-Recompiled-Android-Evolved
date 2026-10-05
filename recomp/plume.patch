@@ -32,7 +32,7 @@ index 9dcfedf..f90f896 100644
          // Samplers.
          bool samplerMirrorClampToEdge = false;
 diff --git a/plume_vulkan.cpp b/plume_vulkan.cpp
-index f1dd503..49cb060 100644
+index f1dd503..0178b41 100644
 --- a/plume_vulkan.cpp
 +++ b/plume_vulkan.cpp
 @@ -13,6 +13,7 @@
@@ -607,7 +607,7 @@ index f1dd503..49cb060 100644
          if (scalarBlockLayoutFound) {
              layoutFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES;
              layoutFeatures.pNext = featuresChain;
-@@ -3932,7 +4261,30 @@ namespace plume {
+@@ -3932,7 +4261,47 @@ namespace plume {
              createDeviceChain = &accelerationStructureFeatures;
          }
  
@@ -632,14 +632,31 @@ index f1dd503..49cb060 100644
 +        }
 +        const uint32_t textureLimit = std::min(textureSetLimit, textureStageLimit);
 +        // Reserve space for the other image bindings and never exceed RT64's texture array.
-+        maxBoundlessDescriptors = std::min(8192U, (textureLimit > 64) ? (textureLimit - 32) : textureLimit);
++        maxBoundlessDescriptors = std::min(8192U, (textureLimit > 64) ? (textureLimit - 32) : (textureLimit - std::min(textureLimit / 2, 8U)));
 +        fprintf(stderr, "%s: textures up to %u (driver limits: set %u, stage %u).\n",
 +            descriptorIndexingSupported ? "Descriptor indexing" : "No descriptor indexing",
 +            maxBoundlessDescriptors, textureSetLimit, textureStageLimit);
++
++        // Smaller texture arrays, numbered per frame (a frame of Conker uses some 270 textures),
++        // where RT64's 8192 went wrong in players' reports: Mali (textures drawn white), PowerVR,
++        // and Qualcomm drivers without descriptor indexing (graphics pipelines failing to build).
++        // CONKER_TEXTURE_ARRAY overrides the size, for testing.
++        uint32_t smallTextureArray = 0;
++        const uint32_t vendorID = physicalDeviceProperties.vendorID;
++        if ((vendorID == 0x13B5) || (vendorID == 0x1010) || ((vendorID == 0x5143) && !descriptorIndexingSupported)) {
++            smallTextureArray = 1024;
++        }
++        if (const char *forced = getenv("CONKER_TEXTURE_ARRAY")) {
++            smallTextureArray = uint32_t(strtoul(forced, nullptr, 10));
++        }
++        if ((smallTextureArray > 0) && (smallTextureArray < maxBoundlessDescriptors)) {
++            maxBoundlessDescriptors = smallTextureArray;
++            fprintf(stderr, "Texture arrays for this GPU: %u.\n", maxBoundlessDescriptors);
++        }
          if (descriptorIndexingSupported) {
              indexingFeatures.pNext = createDeviceChain;
              createDeviceChain = &indexingFeatures;
-@@ -4049,7 +4401,53 @@ namespace plume {
+@@ -4049,7 +4418,53 @@ namespace plume {
          createInfo.enabledExtensionCount = uint32_t(enabledExtensions.size());
          createInfo.pEnabledFeatures = &deviceFeatures.features;
  
@@ -693,7 +710,7 @@ index f1dd503..49cb060 100644
          if (res != VK_SUCCESS) {
              fprintf(stderr, "vkCreateDevice failed with error code 0x%X.\n", res);
              return;
-@@ -4088,7 +4486,7 @@ namespace plume {
+@@ -4088,7 +4503,7 @@ namespace plume {
          allocatorInfo.device = vk;
          allocatorInfo.pVulkanFunctions = &vmaFunctions;
          allocatorInfo.instance = renderInterface->instance;
@@ -702,7 +719,7 @@ index f1dd503..49cb060 100644
  
          res = vmaCreateAllocator(&allocatorInfo, &allocator);
          if (res != VK_SUCCESS) {
-@@ -4120,20 +4518,54 @@ namespace plume {
+@@ -4120,20 +4535,54 @@ namespace plume {
          description.dedicatedVideoMemory = memoryHeapSize;
  
          // Fill capabilities.

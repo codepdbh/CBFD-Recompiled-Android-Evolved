@@ -640,7 +640,7 @@ index 08f83e5..759bd20 100755
          XWindowAttributes attributes;
          XGetWindowAttributes(windowHandle.display, windowHandle.window, &attributes);
 diff --git a/src/hle/rt64_framebuffer_manager.cpp b/src/hle/rt64_framebuffer_manager.cpp
-index d7caa12..60112aa 100644
+index d7caa12..be9587f 100644
 --- a/src/hle/rt64_framebuffer_manager.cpp
 +++ b/src/hle/rt64_framebuffer_manager.cpp
 @@ -4,6 +4,8 @@
@@ -704,6 +704,15 @@ index d7caa12..60112aa 100644
                  it->second.rdramChanged = true;
              }
  
+@@ -1037,7 +1063,7 @@ namespace RT64 {
+             renderWorker->commandList->barriers(RenderBarrierStage::GRAPHICS_AND_COMPUTE, tileCopyAfterBarriers);
+         }
+ 
+-        const bool reinterpretTiles = !cmdListReinterpretations.cmdListDispatches.empty();
++        const bool reinterpretTiles = !cmdListReinterpretations.cmdListDispatches.empty() && (shaderLibrary->fbReinterpret.pipeline != nullptr);
+         if (reinterpretTiles) {
+             tileCopyBeforeBarriers.clear();
+             tileCopyAfterBarriers.clear();
 diff --git a/src/hle/rt64_game_frame.cpp b/src/hle/rt64_game_frame.cpp
 index 87392d0..fb20d9e 100644
 --- a/src/hle/rt64_game_frame.cpp
@@ -1808,29 +1817,30 @@ index 3add9c3..3bc4d0b 100644
          bool textureCacheReplacementMapEnabled = false;
          std::vector<InstanceDrawCall> instanceDrawCallVector;
 diff --git a/src/render/rt64_native_target.cpp b/src/render/rt64_native_target.cpp
-index 6891b7b..e040322 100644
+index 6891b7b..07f7f50 100644
 --- a/src/render/rt64_native_target.cpp
 +++ b/src/render/rt64_native_target.cpp
-@@ -63,6 +63,12 @@ namespace RT64 {
+@@ -63,6 +63,13 @@ namespace RT64 {
      uint32_t NativeTarget::copyFromRAM(RenderWorker *worker, FramebufferChange &emptyFbChange, uint32_t width, uint32_t height, uint32_t rowStart, uint8_t siz, uint8_t fmt, const uint8_t *data, bool invalidateTargets, const ShaderLibrary *shaderLibrary) {
          assert(worker != nullptr);
  
 +        // 8 and 16-bit framebuffers go through formatted buffers of their size, which some drivers
 +        // (older mobile ones) can't write from shaders: skipped there, rather than crashing.
-+        if ((siz != G_IM_SIZ_32b) && !worker->device->getCapabilities().storageTexelBuffer8And16Bit) {
++        // The same when the driver couldn't build the copy shaders at all.
++        if (!shaderLibrary->framebufferCopies || ((siz != G_IM_SIZ_32b) && !worker->device->getCapabilities().storageTexelBuffer8And16Bit)) {
 +            return 0;
 +        }
 +
          // Create the buffers for change count readback if they've not been created yet.
          if ((changeCountBuffer == nullptr) || (changeReadbackBuffer == nullptr)) {
              changeCountBuffer = worker->device->createBuffer(RenderBufferDesc::DefaultBuffer(sizeof(uint32_t), RenderBufferFlag::STORAGE | RenderBufferFlag::UNORDERED_ACCESS));
-@@ -234,6 +240,13 @@ namespace RT64 {
+@@ -234,6 +241,13 @@ namespace RT64 {
      void NativeTarget::copyToNative(RenderWorker *worker, RenderTarget *srcTarget, uint32_t rowWidth, uint32_t rowStart, uint32_t rowEnd, uint8_t siz, uint8_t fmt, uint32_t ditherPattern, uint32_t ditherRandomSeed, const ShaderLibrary *shaderLibrary) {
          assert(worker != nullptr);
  
 +        // See copyFromRAM: without 8 and 16-bit formatted buffers, nothing is copied (and copyToRAM
 +        // then leaves RDRAM alone).
-+        copyToNativeSkipped = (siz != G_IM_SIZ_32b) && !worker->device->getCapabilities().storageTexelBuffer8And16Bit;
++        copyToNativeSkipped = !shaderLibrary->framebufferCopies || ((siz != G_IM_SIZ_32b) && !worker->device->getCapabilities().storageTexelBuffer8And16Bit);
 +        if (copyToNativeSkipped) {
 +            return;
 +        }
@@ -1838,7 +1848,7 @@ index 6891b7b..e040322 100644
          srcTarget->resolveTarget(worker, shaderLibrary);
  
          if (srcTarget->fbWriteDescSet == nullptr) {
-@@ -358,6 +371,10 @@ namespace RT64 {
+@@ -358,6 +372,10 @@ namespace RT64 {
      }
  
      void NativeTarget::copyToRAM(uint32_t rowStart, uint32_t rowEnd, uint32_t width, uint8_t siz, uint8_t *data) {
@@ -2028,7 +2038,7 @@ index 5c40c18..ce86cab 100644
          uint32_t shaderCount();
      };
 diff --git a/src/render/rt64_shader_library.cpp b/src/render/rt64_shader_library.cpp
-index d1c5273..36c00e9 100644
+index d1c5273..54f796f 100644
 --- a/src/render/rt64_shader_library.cpp
 +++ b/src/render/rt64_shader_library.cpp
 @@ -3,6 +3,7 @@
@@ -2039,7 +2049,7 @@ index d1c5273..36c00e9 100644
  
  #include "common/rt64_common.h"
  #include "shared/rt64_render_target_copy.h"
-@@ -174,6 +175,15 @@
+@@ -174,6 +175,26 @@
  #endif
  
  namespace RT64 {
@@ -2052,10 +2062,21 @@ index d1c5273..36c00e9 100644
 +        return pipeline;
 +    }
 +
++    // For pipelines the renderer can do without: a failure is logged and clears available.
++    static std::unique_ptr<RenderPipeline> optionalPipeline(std::unique_ptr<RenderPipeline> pipeline, const char *name, bool &available) {
++        if ((pipeline == nullptr) || !pipeline->isValid()) {
++            fprintf(stderr, "RT64: failed to create pipeline '%s': framebuffer copies to and from RDRAM are skipped.\n", name);
++            available = false;
++            return nullptr;
++        }
++        pipeline->setName(name);
++        return pipeline;
++    }
++
      // ShaderLibrary
  
      ShaderLibrary::ShaderLibrary(bool usesHDR, bool usesHardwareResolve) {
-@@ -262,10 +272,10 @@ namespace RT64 {
+@@ -262,10 +283,10 @@ namespace RT64 {
              layoutBuilder.addDescriptorSet(descriptorSet);
              layoutBuilder.end();
              bicubicScaling.pipelineLayout = layoutBuilder.create(device);
@@ -2068,7 +2089,7 @@ index d1c5273..36c00e9 100644
          }
  
          // Box filter.
-@@ -279,27 +289,32 @@ namespace RT64 {
+@@ -279,27 +300,32 @@ namespace RT64 {
  
              std::unique_ptr<RenderShader> computeShader = device->createShader(CREATE_SHADER_INPUTS(BoxFilterCSBlobDXIL, BoxFilterCSBlobSPIRV, BoxFilterCSBlobMSL, "CSMain", shaderFormat));
              RenderComputePipelineDesc pipelineDesc(boxFilter.pipelineLayout.get(), computeShader.get(), 8, 8, 1);
@@ -2118,7 +2139,7 @@ index d1c5273..36c00e9 100644
  
          /*
          RT64_LOG_PRINTF("Creating the Im3d pipeline state");
-@@ -352,7 +367,7 @@ namespace RT64 {
+@@ -352,7 +378,7 @@ namespace RT64 {
  
              std::unique_ptr<RenderShader> computeShader = device->createShader(CREATE_SHADER_INPUTS(IdleCSBlobDXIL, IdleCSBlobSPIRV, IdleCSBlobMSL, "CSMain", shaderFormat));
              RenderComputePipelineDesc pipelineDesc(idle.pipelineLayout.get(), computeShader.get(), 1, 1, 1);
@@ -2127,7 +2148,7 @@ index d1c5273..36c00e9 100644
          }
  
          // Framebuffer changes clear.
-@@ -365,7 +380,7 @@ namespace RT64 {
+@@ -365,7 +391,7 @@ namespace RT64 {
  
              std::unique_ptr<RenderShader> computeShader = device->createShader(CREATE_SHADER_INPUTS(FbChangesClearCSBlobDXIL, FbChangesClearCSBlobSPIRV, FbChangesClearCSBlobMSL, "CSMain", shaderFormat));
              RenderComputePipelineDesc pipelineDesc(fbChangesClear.pipelineLayout.get(), computeShader.get(), 1, 1, 1);
@@ -2136,38 +2157,44 @@ index d1c5273..36c00e9 100644
          }
  
          // Framebuffer read any changes and full.
-@@ -381,10 +396,10 @@ namespace RT64 {
+@@ -381,10 +407,10 @@ namespace RT64 {
              fbReadAnyFull.pipelineLayout = layoutBuilder.create(device);
  
              std::unique_ptr<RenderShader> anyChangesShader = device->createShader(CREATE_SHADER_INPUTS(FbReadAnyChangesCSBlobDXIL, FbReadAnyChangesCSBlobSPIRV, FbReadAnyChangesCSBlobMSL, "CSMain", shaderFormat));
 -            fbReadAnyChanges.pipeline = device->createComputePipeline(RenderComputePipelineDesc(fbReadAnyChanges.pipelineLayout.get(), anyChangesShader.get(), 8, 8, 1));
-+            fbReadAnyChanges.pipeline = checkedPipeline(device->createComputePipeline(RenderComputePipelineDesc(fbReadAnyChanges.pipelineLayout.get(), anyChangesShader.get(), 8, 8, 1)), "fbReadAnyChanges");
++            fbReadAnyChanges.pipeline = optionalPipeline(device->createComputePipeline(RenderComputePipelineDesc(fbReadAnyChanges.pipelineLayout.get(), anyChangesShader.get(), 8, 8, 1)), "fbReadAnyChanges", framebufferCopies);
  
              std::unique_ptr<RenderShader> fullShader = device->createShader(CREATE_SHADER_INPUTS(FbReadAnyFullCSBlobDXIL, FbReadAnyFullCSBlobSPIRV, FbReadAnyFullCSBlobMSL, "CSMain", shaderFormat));
 -            fbReadAnyFull.pipeline = device->createComputePipeline(RenderComputePipelineDesc(fbReadAnyFull.pipelineLayout.get(), fullShader.get(), 8, 8, 1));
-+            fbReadAnyFull.pipeline = checkedPipeline(device->createComputePipeline(RenderComputePipelineDesc(fbReadAnyFull.pipelineLayout.get(), fullShader.get(), 8, 8, 1)), "fbReadAnyFull");
++            fbReadAnyFull.pipeline = optionalPipeline(device->createComputePipeline(RenderComputePipelineDesc(fbReadAnyFull.pipelineLayout.get(), fullShader.get(), 8, 8, 1)), "fbReadAnyFull", framebufferCopies);
          }
  
          // Framebuffer Reinterpretation.
-@@ -398,7 +413,7 @@ namespace RT64 {
- 
+@@ -399,6 +425,14 @@ namespace RT64 {
              std::unique_ptr<RenderShader> computeShader = device->createShader(CREATE_SHADER_INPUTS(FbReinterpretCSBlobDXIL, FbReinterpretCSBlobSPIRV, FbReinterpretCSBlobMSL, "CSMain", shaderFormat));
              RenderComputePipelineDesc pipelineDesc(fbReinterpret.pipelineLayout.get(), computeShader.get(), 8, 8, 1);
--            fbReinterpret.pipeline = device->createComputePipeline(pipelineDesc);
-+            fbReinterpret.pipeline = checkedPipeline(device->createComputePipeline(pipelineDesc), "fbReinterpret");
+             fbReinterpret.pipeline = device->createComputePipeline(pipelineDesc);
++            if ((fbReinterpret.pipeline == nullptr) || !fbReinterpret.pipeline->isValid()) {
++                // Optional too: tiles are then not reinterpreted between formats.
++                fprintf(stderr, "RT64: failed to create pipeline 'fbReinterpret': framebuffer reinterpretation is skipped.\n");
++                fbReinterpret.pipeline.reset();
++            }
++            else {
++                fbReinterpret.pipeline->setName("fbReinterpret");
++            }
          }
  
          // Framebuffer write color or depth.
-@@ -415,83 +430,88 @@ namespace RT64 {
+@@ -415,83 +449,88 @@ namespace RT64 {
              fbWriteDepthMS.pipelineLayout = layoutBuilder.create(device);
  
              std::unique_ptr<RenderShader> colorShader = device->createShader(CREATE_SHADER_INPUTS(FbWriteColorCSBlobDXIL, FbWriteColorCSBlobSPIRV, FbWriteColorCSBlobMSL, "CSMain", shaderFormat));
 -            fbWriteColor.pipeline = device->createComputePipeline(RenderComputePipelineDesc(fbWriteColor.pipelineLayout.get(), colorShader.get(), 8, 8, 1));
-+            fbWriteColor.pipeline = checkedPipeline(device->createComputePipeline(RenderComputePipelineDesc(fbWriteColor.pipelineLayout.get(), colorShader.get(), 8, 8, 1)), "fbWriteColor");
++            fbWriteColor.pipeline = optionalPipeline(device->createComputePipeline(RenderComputePipelineDesc(fbWriteColor.pipelineLayout.get(), colorShader.get(), 8, 8, 1)), "fbWriteColor", framebufferCopies);
  
              std::unique_ptr<RenderShader> depthShader = device->createShader(CREATE_SHADER_INPUTS(FbWriteDepthCSBlobDXIL, FbWriteDepthCSBlobSPIRV, FbWriteDepthCSBlobMSL, "CSMain", shaderFormat));
 -            fbWriteDepth.pipeline = device->createComputePipeline(RenderComputePipelineDesc(fbWriteDepth.pipelineLayout.get(), depthShader.get(), 8, 8, 1));
-+            fbWriteDepth.pipeline = checkedPipeline(device->createComputePipeline(RenderComputePipelineDesc(fbWriteDepth.pipelineLayout.get(), depthShader.get(), 8, 8, 1)), "fbWriteDepth");
++            fbWriteDepth.pipeline = optionalPipeline(device->createComputePipeline(RenderComputePipelineDesc(fbWriteDepth.pipelineLayout.get(), depthShader.get(), 8, 8, 1)), "fbWriteDepth", framebufferCopies);
  
              std::unique_ptr<RenderShader> depthShaderMS = device->createShader(CREATE_SHADER_INPUTS(FbWriteDepthCSMSBlobDXIL, FbWriteDepthCSMSBlobSPIRV, FbWriteDepthCSMSBlobMSL, "CSMain", shaderFormat));
 -            fbWriteDepthMS.pipeline = device->createComputePipeline(RenderComputePipelineDesc(fbWriteDepthMS.pipelineLayout.get(), depthShaderMS.get(), 8, 8, 1));
@@ -2185,8 +2212,9 @@ index d1c5273..36c00e9 100644
 -            std::unique_ptr<RenderShader> computeShader = device->createShader(CREATE_SHADER_INPUTS(GaussianFilterRGB3x3CSBlobDXIL, GaussianFilterRGB3x3CSBlobSPIRV, GaussianFilterRGB3x3CSBlobMSL, "CSMain", shaderFormat));
 -            RenderComputePipelineDesc pipelineDesc(gaussianFilterRGB3x3.pipelineLayout.get(), computeShader.get(), 8, 8, 1);
 -            gaussianFilterRGB3x3.pipeline = device->createComputePipeline(pipelineDesc);
--        }
--
++            fbWriteDepthMS.pipeline = optionalPipeline(device->createComputePipeline(RenderComputePipelineDesc(fbWriteDepthMS.pipelineLayout.get(), depthShaderMS.get(), 8, 8, 1)), "fbWriteDepthMS", framebufferCopies);
+         }
+ 
 -        // Histogram average.
 -        {
 -            HistogramAverageDescriptorSet descriptorSet;
@@ -2199,9 +2227,8 @@ index d1c5273..36c00e9 100644
 -            std::unique_ptr<RenderShader> computeShader = device->createShader(CREATE_SHADER_INPUTS(HistogramAverageCSBlobDXIL, HistogramAverageCSBlobSPIRV, HistogramAverageCSBlobMSL, "CSMain", shaderFormat));
 -            RenderComputePipelineDesc pipelineDesc(histogramAverage.pipelineLayout.get(), computeShader.get(), 8, 8, 1);
 -            histogramAverage.pipeline = device->createComputePipeline(pipelineDesc);
-+            fbWriteDepthMS.pipeline = checkedPipeline(device->createComputePipeline(RenderComputePipelineDesc(fbWriteDepthMS.pipelineLayout.get(), depthShaderMS.get(), 8, 8, 1)), "fbWriteDepthMS");
-         }
- 
+-        }
+-
 -        // Histogram clear.
 -        {
 -            HistogramClearDescriptorSet descriptorSet;
@@ -2312,7 +2339,7 @@ index d1c5273..36c00e9 100644
  
          // RSP Modify.
          {
-@@ -504,7 +524,7 @@ namespace RT64 {
+@@ -504,7 +543,7 @@ namespace RT64 {
  
              std::unique_ptr<RenderShader> computeShader = device->createShader(CREATE_SHADER_INPUTS(RSPModifyCSBlobDXIL, RSPModifyCSBlobSPIRV, RSPModifyCSBlobMSL, "CSMain", shaderFormat));
              RenderComputePipelineDesc pipelineDesc(rspModify.pipelineLayout.get(), computeShader.get(), 64, 1, 1);
@@ -2321,7 +2348,7 @@ index d1c5273..36c00e9 100644
          }
  
          // RSP Process.
-@@ -518,7 +538,7 @@ namespace RT64 {
+@@ -518,7 +557,7 @@ namespace RT64 {
  
              std::unique_ptr<RenderShader> computeShader = device->createShader(CREATE_SHADER_INPUTS(RSPProcessCSBlobDXIL, RSPProcessCSBlobSPIRV, RSPProcessCSBlobMSL, "CSMain", shaderFormat));
              RenderComputePipelineDesc pipelineDesc(rspProcess.pipelineLayout.get(), computeShader.get(), 64, 1, 1);
@@ -2330,7 +2357,7 @@ index d1c5273..36c00e9 100644
          }
  
          // RSP Smooth Normal.
-@@ -532,7 +552,7 @@ namespace RT64 {
+@@ -532,7 +571,7 @@ namespace RT64 {
  
              std::unique_ptr<RenderShader> computeShader = device->createShader(CREATE_SHADER_INPUTS(RSPSmoothNormalCSBlobDXIL, RSPSmoothNormalCSBlobSPIRV, RSPSmoothNormalCSBlobMSL, "CSMain", shaderFormat));
              RenderComputePipelineDesc pipelineDesc(rspSmoothNormal.pipelineLayout.get(), computeShader.get(), 64, 1, 1);
@@ -2339,7 +2366,7 @@ index d1c5273..36c00e9 100644
          }
  
          // RSP World.
-@@ -546,7 +566,7 @@ namespace RT64 {
+@@ -546,7 +585,7 @@ namespace RT64 {
  
              std::unique_ptr<RenderShader> computeShader = device->createShader(CREATE_SHADER_INPUTS(RSPWorldCSBlobDXIL, RSPWorldCSBlobSPIRV, RSPWorldCSBlobMSL, "CSMain", shaderFormat));
              RenderComputePipelineDesc pipelineDesc(rspWorld.pipelineLayout.get(), computeShader.get(), 64, 1, 1);
@@ -2348,7 +2375,7 @@ index d1c5273..36c00e9 100644
          }
  
          // Texture Copy.
-@@ -566,7 +586,7 @@ namespace RT64 {
+@@ -566,7 +605,7 @@ namespace RT64 {
              pipelineDesc.renderTargetCount = 1;
              pipelineDesc.vertexShader = fullScreenVertexShader.get();
              pipelineDesc.pixelShader = pixelShader.get();
@@ -2357,7 +2384,7 @@ index d1c5273..36c00e9 100644
          }
  
          // Texture Decode.
-@@ -580,7 +600,7 @@ namespace RT64 {
+@@ -580,7 +619,7 @@ namespace RT64 {
  
              std::unique_ptr<RenderShader> computeShader = device->createShader(CREATE_SHADER_INPUTS(TextureDecodeCSBlobDXIL, TextureDecodeCSBlobSPIRV, TextureDecodeCSBlobMSL, "CSMain", shaderFormat));
              RenderComputePipelineDesc pipelineDesc(textureDecode.pipelineLayout.get(), computeShader.get(), 8, 8, 1);
@@ -2366,7 +2393,7 @@ index d1c5273..36c00e9 100644
          }
  
          // Video Interface.
-@@ -599,11 +619,15 @@ namespace RT64 {
+@@ -599,11 +638,15 @@ namespace RT64 {
              RenderGraphicsPipelineDesc pipelineDesc;
              pipelineDesc.vertexShader = fullScreenVertexShader.get();
              pipelineDesc.pixelShader = regularShader.get();
@@ -2383,7 +2410,7 @@ index d1c5273..36c00e9 100644
  
              layoutBuilder.begin();
              layoutBuilder.addPushConstant(0, 0, sizeof(interop::VideoInterfaceCB), RenderShaderStageFlag::PIXEL);
-@@ -613,15 +637,36 @@ namespace RT64 {
+@@ -613,15 +656,36 @@ namespace RT64 {
              videoInterfacePixel.pipelineLayout = layoutBuilder.create(device);
  
              pipelineDesc.pipelineLayout = videoInterfaceLinear.pipelineLayout.get();
@@ -2422,7 +2449,7 @@ index d1c5273..36c00e9 100644
          assert(rhi != nullptr);
          assert(device != nullptr);
  
-@@ -773,7 +818,7 @@ namespace RT64 {
+@@ -773,7 +837,7 @@ namespace RT64 {
              pipelineDesc.vertexShader = fullScreenVertexShader.get();
              pipelineDesc.pixelShader = colorShader.get();
              pipelineDesc.multisampling = multisampling;
@@ -2431,7 +2458,7 @@ index d1c5273..36c00e9 100644
  
              std::unique_ptr<RenderShader> depthShader = device->createShader(CREATE_SHADER_INPUTS(FbChangesDrawDepthPSBlobDXIL, FbChangesDrawDepthPSBlobSPIRV, FbChangesDrawDepthPSBlobMSL, "PSMain", shaderFormat));
              pipelineDesc.pipelineLayout = fbChangesDrawDepth.pipelineLayout.get();
-@@ -782,7 +827,7 @@ namespace RT64 {
+@@ -782,7 +846,7 @@ namespace RT64 {
              pipelineDesc.depthFunction = RenderComparisonFunction::ALWAYS;
              pipelineDesc.depthWriteEnabled = true;
              pipelineDesc.depthTargetFormat = RenderFormat::D32_FLOAT;
@@ -2440,7 +2467,7 @@ index d1c5273..36c00e9 100644
          }
  
          // Copy color to depth and depth to color.
-@@ -805,13 +850,13 @@ namespace RT64 {
+@@ -805,13 +869,13 @@ namespace RT64 {
              pipelineDesc.vertexShader = fullScreenVertexShader.get();
              pipelineDesc.pipelineLayout = rtCopyDepthToColor.pipelineLayout.get();
              pipelineDesc.pixelShader = depthToColorShader.get();
@@ -2456,7 +2483,7 @@ index d1c5273..36c00e9 100644
              }
  
              std::unique_ptr<RenderShader> colorToDepthShader = device->createShader(RtCopyColorToDepthPSBlob, RtCopyColorToDepthPSBlobSize, "PSMain", shaderFormat);
-@@ -822,60 +867,65 @@ namespace RT64 {
+@@ -822,60 +886,65 @@ namespace RT64 {
              pipelineDesc.pipelineLayout = rtCopyColorToDepth.pipelineLayout.get();
              pipelineDesc.pixelShader = colorToDepthShader.get();
              pipelineDesc.multisampling = RenderMultisampling();
@@ -2565,7 +2592,7 @@ index d1c5273..36c00e9 100644
  
          // RSP Vertex Test Z.
          {
-@@ -890,10 +940,10 @@ namespace RT64 {
+@@ -890,10 +959,10 @@ namespace RT64 {
              rspVertexTestZMS.pipelineLayout = layoutBuilder.create(device);
  
              std::unique_ptr<RenderShader> computeShader = device->createShader(CREATE_SHADER_INPUTS(RSPVertexTestZCSBlobDXIL, RSPVertexTestZCSBlobSPIRV, RSPVertexTestZCSBlobMSL, "CSMain", shaderFormat));
@@ -2578,7 +2605,7 @@ index d1c5273..36c00e9 100644
          }
  
          // Texture Resolve.
-@@ -913,7 +963,7 @@ namespace RT64 {
+@@ -913,7 +982,7 @@ namespace RT64 {
              pipelineDesc.renderTargetCount = 1;
              pipelineDesc.vertexShader = fullScreenVertexShader.get();
              pipelineDesc.pixelShader = pixelShader.get();
@@ -2588,7 +2615,7 @@ index d1c5273..36c00e9 100644
      }
  };
 diff --git a/src/render/rt64_shader_library.h b/src/render/rt64_shader_library.h
-index 641f3ec..568452f 100644
+index 641f3ec..bc4e867 100644
 --- a/src/render/rt64_shader_library.h
 +++ b/src/render/rt64_shader_library.h
 @@ -5,8 +5,13 @@
@@ -2605,7 +2632,18 @@ index 641f3ec..568452f 100644
      struct ShaderRecord {
          std::unique_ptr<RenderPipeline> pipeline;
          std::unique_ptr<RenderPipelineLayout> pipelineLayout;
-@@ -62,5 +67,7 @@ namespace RT64 {
+@@ -17,6 +22,10 @@ namespace RT64 {
+         bool usesHDR = false;
+         bool usesHardwareResolve = false;
+ 
++        // False when the driver couldn't build the shaders that copy framebuffers to and from RDRAM
++        // (Adreno 750 drivers fail them): those copies are then skipped, as on older drivers.
++        bool framebufferCopies = true;
++
+         // All shaders.
+         ShaderRecord bicubicScaling;
+         ShaderRecord boxFilter;
+@@ -62,5 +71,7 @@ namespace RT64 {
          ~ShaderLibrary();
          void setupCommonShaders(RenderInterface *rhi, RenderDevice *device);
          void setupMultisamplingShaders(RenderInterface *rhi, RenderDevice *device, const RenderMultisampling &multisampling);
@@ -2613,3 +2651,44 @@ index 641f3ec..568452f 100644
 +        void setupMultisamplingShadersImpl(RenderInterface *rhi, RenderDevice *device, const RenderMultisampling &multisampling);
      };
  };
+diff --git a/src/tools/file_to_c/file_to_c.cmake b/src/tools/file_to_c/file_to_c.cmake
+new file mode 100644
+index 0000000..ea68014
+--- /dev/null
++++ b/src/tools/file_to_c/file_to_c.cmake
+@@ -0,0 +1,35 @@
++# file_to_c as a CMake script, for cross-compiling (the program can't run on the build
++# machine then). Same output as file_to_c.cpp:
++#   cmake -P file_to_c.cmake [input file] [array name] [output C file] [output C header]
++if (NOT CMAKE_ARGC EQUAL 7)
++    message(FATAL_ERROR "Usage: cmake -P file_to_c.cmake [input file] [array name] [output C file] [output C header]")
++endif()
++set(input_path "${CMAKE_ARGV3}")
++set(array_name "${CMAKE_ARGV4}")
++set(output_c_path "${CMAKE_ARGV5}")
++set(output_h_path "${CMAKE_ARGV6}")
++
++file(READ "${input_path}" contents HEX)
++string(LENGTH "${contents}" hex_length)
++if (hex_length EQUAL 0)
++    message(FATAL_ERROR "Failed to open file ${input_path}! (Or it's empty)")
++endif()
++math(EXPR size "${hex_length} / 2")
++string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\1," bytes "${contents}")
++
++file(WRITE "${output_c_path}"
++    "#include <stddef.h>\n"
++    "extern const char ${array_name}[${size}];\n"
++    "const char ${array_name}[${size}] = {${bytes}};\n"
++    "extern const size_t ${array_name}_size;\n"
++    "const size_t ${array_name}_size = sizeof(${array_name}) / sizeof(${array_name}[0]);\n")
++file(WRITE "${output_h_path}"
++    "#ifdef __cplusplus\n"
++    "  extern \"C\" {\n"
++    "#endif\n"
++    "#include <stddef.h>\n"
++    "extern const char ${array_name}[${size}];\n"
++    "extern const size_t ${array_name}_size;\n"
++    "#ifdef __cplusplus\n"
++    "  }\n"
++    "#endif\n")
