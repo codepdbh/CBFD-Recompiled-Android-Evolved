@@ -117,6 +117,15 @@ python tools/htc_to_rtz.py CONKER.BFD_HIRESTEXTURES.htc conker_hires_textures.rt
 `--max-size` reduce las texturas más grandes: los teléfonos tienen mucha menos
 memoria para texturas que un PC. Usa `--max-size 0` para dejarlas intactas.
 
+## Drivers de GPU (opcional, solo 64 bits)
+
+En **Ajustes → Driver de GPU → Cambiar driver → Importar ZIP** puedes usar un driver
+Vulkan alternativo, como Turnip para Adreno (ZIP en formato adrenotools, con `meta.json`;
+por ejemplo, los de [K11MCH1/AdrenoToolsDrivers](https://github.com/K11MCH1/AdrenoToolsDrivers/releases)).
+Puede dar más rendimiento o arreglar errores gráficos. Si el driver no reconoce tu GPU,
+el juego usa automáticamente el del sistema; si falla de otra forma, vuelve a
+**Driver del sistema** en el mismo menú.
+
 ## Controles
 
 - **Botones táctiles:** aparecen solos. Toca **✎** (arriba al centro) para moverlos
