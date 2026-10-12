@@ -44,7 +44,7 @@ public class SettingsActivity extends Activity {
     // Graphics presets: resolution and antialiasing (the frame rate is chosen on its own).
     private enum Preset {
         PERFORMANCE("Fluido", "Resolución media (480p): lo más fluido, menos calor y batería."),
-        BALANCED("Equilibrado", "Resolución alta (hasta 960p): nítido y fluido. Recomendado."),
+        BALANCED("Equilibrado", "Resolución según tu teléfono (960p en los potentes, 480p en los demás). Recomendado."),
         QUALITY("Calidad", "La resolución de la pantalla, con bordes suaves (antialiasing). Muy exigente.");
 
         final String label, description;
@@ -114,9 +114,9 @@ public class SettingsActivity extends Activity {
     }
 
     /**
-     * Balanced renders at up to 4x the N64's 240 lines (960p), not at the screen's resolution: as
-     * sharp on a phone, and less than half the GPU work at 1440p, so high frame rates hold steady.
-     * Quality keeps the screen's (this marker), which the game's own "Auto" means.
+     * Balanced renders at up to 4x the N64's 240 lines (960p) on fast GPUs and 2x (480p) on the rest
+     * (GpuInfo), not at the screen's resolution: as sharp on a phone, and far less GPU work, so frame
+     * rates hold steady. Quality keeps the screen's (this marker), which the game's own "Auto" means.
      */
     private static File nativeResolutionMarker() {
         return new File(MainActivity.gameFolder(), ".android_native_resolution");
@@ -129,7 +129,8 @@ public class SettingsActivity extends Activity {
             return 0;
         }
         int screenScale = Math.max(1, screenHeight / 240);
-        return screenScale > 4 ? 4 : 0;
+        int scale = GpuInfo.isHighEnd() ? 4 : 2;
+        return screenScale > scale ? scale : 0;
     }
 
     private static void applyPreset(JSONObject json, Preset preset) throws Exception {

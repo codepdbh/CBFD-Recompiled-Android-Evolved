@@ -38,6 +38,8 @@ public class GameActivity extends SDLActivity {
             android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
             int scale = SettingsActivity.resolutionScale(Math.min(metrics.widthPixels, metrics.heightPixels));
             android.system.Os.setenv("CONKER_RES_SCALE", Integer.toString(scale), true);
+            GameLog.append("[android] GPU " + GpuInfo.renderer() + ", resolution scale "
+                + (scale > 0 ? scale + "x" : "of the settings") + "\n");
         } catch (Exception e) {
             // The screen's resolution then.
         }

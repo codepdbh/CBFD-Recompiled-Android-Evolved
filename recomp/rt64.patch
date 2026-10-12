@@ -2034,7 +2034,7 @@ index 5a331aa..f72760d 100644
  
                  // FIXME: This is a very hacky way to find out if we need to advance the frame if the workload was paused for the first time.
 diff --git a/src/render/rt64_framebuffer_renderer.cpp b/src/render/rt64_framebuffer_renderer.cpp
-index 9fae0d4..bc9f114 100644
+index 9fae0d4..4bf52f8 100644
 --- a/src/render/rt64_framebuffer_renderer.cpp
 +++ b/src/render/rt64_framebuffer_renderer.cpp
 @@ -7,6 +7,7 @@
@@ -2166,7 +2166,33 @@ index 9fae0d4..bc9f114 100644
          // Make sure the versions vector matches the texture cache size.
          descriptorTextureVersions.resize(textureCacheSize, 0);
  
-@@ -1435,6 +1509,16 @@ namespace RT64 {
+@@ -550,6 +624,11 @@ namespace RT64 {
+                     continue;
+                 }
+ 
++                // A draw no pipeline could be built for (a driver's shader compiler failing) is left out.
++                if ((triangles.pipeline == nullptr) || !triangles.pipeline->isValid()) {
++                    break;
++                }
++
+                 // A new pass must be started if decals are required and something wrote to the depth buffer before this call.
+                 const interop::OtherMode otherMode = triangles.shaderDesc.otherMode;
+                 bool depthDecal = (otherMode.zMode() == ZMODE_DEC);
+@@ -578,8 +657,11 @@ namespace RT64 {
+ 
+                 drawCallTriangles(drawCall);
+ 
+-                // Simulate dither noise.
+-                if (triangles.postBlendDitherNoise) {
++                // Simulate dither noise (when its pipelines could be built).
++                const bool ditherPipelinesValid = (postBlendDitherNoiseAddPipeline != nullptr) && postBlendDitherNoiseAddPipeline->isValid() &&
++                    (postBlendDitherNoiseSubPipeline != nullptr) && postBlendDitherNoiseSubPipeline->isValid() &&
++                    (postBlendDitherNoiseSubNegativePipeline != nullptr) && postBlendDitherNoiseSubNegativePipeline->isValid();
++                if (triangles.postBlendDitherNoise && ditherPipelinesValid) {
+                     if (triangles.postBlendDitherNoiseNegative) {
+                         worker->commandList->setPipeline(postBlendDitherNoiseSubNegativePipeline);
+                     }
+@@ -1435,6 +1517,16 @@ namespace RT64 {
          const float scissorRatio = static_cast<float>(fbPair.scissorRect.width(false, true)) / static_cast<float>(fbPair.scissorRect.height(false, true));
          const bool adjustRatio = (abs((scissorRatio / p.aspectRatioSource) - 1.0f) < SimilarityPercentage);
          const float aspectRatioScale = adjustRatio ? (p.aspectRatioTarget / p.aspectRatioSource) : 1.0f;
@@ -2183,7 +2209,7 @@ index 9fae0d4..bc9f114 100644
          InstanceDrawCall instanceDrawCall;
          interop::RenderIndices renderIndices;
          uint32_t globalCallIndex = 0;
-@@ -1488,9 +1572,17 @@ namespace RT64 {
+@@ -1488,9 +1580,17 @@ namespace RT64 {
                  // The call's scissor spans the whole width of the framebuffer pair scissor. Custom origin must not be in use to be able to use the stretched viewport.
                  const auto &viewport = drawData.rspViewports[proj.transformsIndex];
                  FixedRect intersectionRect = proj.scissorRect.intersection(viewport.rect(viewportClipRatios));
@@ -2202,7 +2228,7 @@ index 9fae0d4..bc9f114 100644
                  if (useWideViewport) {
                      projInvRatioScale = 1.0f;
                  }
-@@ -1607,7 +1699,14 @@ namespace RT64 {
+@@ -1607,16 +1707,33 @@ namespace RT64 {
                      {
                          triangles.shaderDesc = call.shaderDesc;
  
@@ -2213,11 +2239,36 @@ index 9fae0d4..bc9f114 100644
 +                        RasterShader *gpuShader = p.ubershadersOnly ? nullptr : p.rasterShaderCache->waitForGPUShader(call.shaderDesc, std::chrono::milliseconds(2000));
 +#                   else
                          RasterShader *gpuShader = p.ubershadersOnly ? nullptr : p.rasterShaderCache->getGPUShader(call.shaderDesc);
+-                        if (gpuShader != nullptr) {
 +#                   endif
-                         if (gpuShader != nullptr) {
++                        const bool copyMode = (call.shaderDesc.otherMode.cycleType() == G_CYC_COPY);
++                        const RenderPipeline *uberPipeline = rasterShaderUber->getPipeline(
++                            !copyMode && call.shaderDesc.otherMode.zCmp() && (call.shaderDesc.otherMode.zMode() != ZMODE_DEC),
++                            !copyMode && call.shaderDesc.otherMode.zUpd(),
++                            (call.shaderDesc.otherMode.cvgDst() == CVG_DST_WRAP) || (call.shaderDesc.otherMode.cvgDst() == CVG_DST_SAVE));
++                        const bool uberValid = (uberPipeline != nullptr) && uberPipeline->isValid();
++#                   if defined(__ANDROID__)
++                        // Some drivers can't build the ubershader at all (Adreno 6xx's 512.530): the draw's own shader
++                        // is then the only one, so it's worth waiting longer for it.
++                        if ((gpuShader == nullptr) && !uberValid && !p.ubershadersOnly) {
++                            gpuShader = p.rasterShaderCache->waitForGPUShader(call.shaderDesc, std::chrono::milliseconds(15000));
++                        }
++#                   endif
++                        if ((gpuShader != nullptr) && (gpuShader->pipeline != nullptr) && gpuShader->pipeline->isValid()) {
                              triangles.pipeline = gpuShader->pipeline.get();
                          }
-@@ -1625,6 +1724,7 @@ namespace RT64 {
+                         else {
+-                            const bool copyMode = (call.shaderDesc.otherMode.cycleType() == G_CYC_COPY);
+-                            triangles.pipeline = rasterShaderUber->getPipeline(
+-                                !copyMode && call.shaderDesc.otherMode.zCmp() && (call.shaderDesc.otherMode.zMode() != ZMODE_DEC),
+-                                !copyMode && call.shaderDesc.otherMode.zUpd(),
+-                                (call.shaderDesc.otherMode.cvgDst() == CVG_DST_WRAP) || (call.shaderDesc.otherMode.cvgDst() == CVG_DST_SAVE));
++                            // When neither could be built, the draw is skipped where it would be drawn.
++                            triangles.pipeline = uberValid ? uberPipeline : nullptr;
+                         }
+                         
+                         triangles.faceCount = call.callDesc.triangleCount;
+@@ -1625,6 +1742,7 @@ namespace RT64 {
  
                          float invRatioScale = 1.0f / aspectRatioScale;
                          float horizontalMisalignment = 0.0f;
@@ -2225,7 +2276,7 @@ index 9fae0d4..bc9f114 100644
                          switch (proj.type) {
                          case Projection::Type::Perspective:
                          case Projection::Type::Orthographic: {
-@@ -1645,14 +1745,46 @@ namespace RT64 {
+@@ -1645,14 +1763,46 @@ namespace RT64 {
                              // The call's scissor spans the whole width of the framebuffer pair scissor. The rect must not be using extended origins.
                              const bool regularOrigins = (call.callDesc.rectLeftOrigin == G_EX_ORIGIN_NONE) && (call.callDesc.rectRightOrigin == G_EX_ORIGIN_NONE);
                              const bool coversScissorWidth = regularOrigins && (call.callDesc.rect.ulx <= fbPair.scissorRect.ulx) && (call.callDesc.rect.lrx >= fbPair.scissorRect.lrx);
@@ -2273,7 +2324,7 @@ index 9fae0d4..bc9f114 100644
                              triangles.screenScale = { viewportRect.width / framebuffer.viewport.width, viewportRect.height / framebuffer.viewport.height };
                              triangles.screenOffset.x = halfPixelOffset.x + ((viewportRect.x + viewportRect.width / 2.0f) - halfViewportSize.x) / halfViewportSize.x;
                              triangles.screenOffset.y = halfPixelOffset.y + (halfViewportSize.y - (viewportRect.y + viewportRect.height / 2.0f)) / halfViewportSize.y;
-@@ -1676,7 +1808,12 @@ namespace RT64 {
+@@ -1676,7 +1826,12 @@ namespace RT64 {
                              break;
                          }
  
