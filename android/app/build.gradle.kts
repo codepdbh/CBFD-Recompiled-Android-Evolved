@@ -50,6 +50,13 @@ android {
         }
     }
 
+    // Custom GPU drivers: libadrenotools loads its hooks from the extracted native library folder.
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false

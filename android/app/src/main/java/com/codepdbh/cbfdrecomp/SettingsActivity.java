@@ -40,6 +40,8 @@ public class SettingsActivity extends Activity {
 
     private JSONObject general, graphics, sound;
     private float density;
+    private TextView driverName;
+    private static final int PICK_DRIVER = 31;
 
     // Graphics presets: resolution and antialiasing (the frame rate is chosen on its own).
     private enum Preset {
@@ -257,6 +259,23 @@ public class SettingsActivity extends Activity {
             !graphics.optString("ar_option", "Expand").equals("Original"),
             on -> put(graphics, "ar_option", on ? "Expand" : "Original")));
 
+        // Vulkan driver (64-bit only).
+        if (GpuDrivers.supported()) {
+            card = card(left, "Driver de GPU");
+            driverName = text("", 16, Color.WHITE, false);
+            refreshDriverName();
+            card.addView(driverName);
+            card.addView(text("Un driver como Turnip (en formato adrenotools, un ZIP con meta.json) puede dar más "
+                + "rendimiento o arreglar errores gráficos en Adreno. Si el juego falla con él, vuelve al del sistema.",
+                13, 0xFFB8A898, false));
+            Button change = new Button(this);
+            change.setText("Cambiar driver");
+            change.setAllCaps(false);
+            change.setTextColor(Color.WHITE);
+            change.setOnClickListener(v -> chooseDriver());
+            card.addView(change);
+        }
+
         // Sound.
         card = card(left, "Sonido");
         card.addView(slider("Volumen", sound.optInt("main_volume", 100), 0, 100, "%",
@@ -300,6 +319,76 @@ public class SettingsActivity extends Activity {
             on -> put(general, "look_stick_invert", on ? "InvertY" : "None")));
 
         return page;
+    }
+
+    // The Vulkan driver: the system's, or one imported (GpuDrivers).
+
+    private void refreshDriverName() {
+        GpuDrivers.Driver driver = GpuDrivers.selected(this);
+        driverName.setText("En uso: " + (driver == null ? "el del sistema" : driver.name));
+    }
+
+    private void chooseDriver() {
+        java.util.List<GpuDrivers.Driver> drivers = GpuDrivers.list(this);
+        String[] names = new String[drivers.size() + 1];
+        names[0] = "Driver del sistema";
+        int checked = 0;
+        for (int i = 0; i < drivers.size(); i++) {
+            names[i + 1] = drivers.get(i).name;
+            if (drivers.get(i).id.equals(GpuDrivers.selectedId(this))) {
+                checked = i + 1;
+            }
+        }
+        android.app.AlertDialog.Builder builder = new android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Driver de GPU")
+            .setSingleChoiceItems(names, checked, (dialog, which) -> {
+                GpuDrivers.select(this, which == 0 ? "" : drivers.get(which - 1).id);
+                refreshDriverName();
+                dialog.dismiss();
+            })
+            .setPositiveButton("Importar ZIP", (dialog, which) -> {
+                android.content.Intent picker = new android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT);
+                picker.addCategory(android.content.Intent.CATEGORY_OPENABLE);
+                picker.setType("*/*");
+                startActivityForResult(picker, PICK_DRIVER);
+            });
+        GpuDrivers.Driver selected = GpuDrivers.selected(this);
+        if (selected != null) {
+            builder.setNeutralButton("Eliminar el elegido", (dialog, which) -> {
+                try {
+                    GpuDrivers.remove(this, selected);
+                } catch (Exception e) {
+                    android.widget.Toast.makeText(this, e.getMessage(), android.widget.Toast.LENGTH_LONG).show();
+                }
+                refreshDriverName();
+            });
+        }
+        builder.show();
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, android.content.Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != PICK_DRIVER || resultCode != RESULT_OK || data == null || data.getData() == null) {
+            return;
+        }
+        android.net.Uri zip = data.getData();
+        driverName.setText("Importando el driver…");
+        new Thread(() -> {
+            String message;
+            try {
+                GpuDrivers.Driver driver = GpuDrivers.importZip(this, zip);
+                GpuDrivers.select(this, driver.id);
+                message = "Driver importado y elegido: " + driver.name + ". Si el juego falla, vuelve al del sistema.";
+            } catch (Exception e) {
+                message = "No se pudo importar: " + e.getMessage();
+            }
+            String shown = message;
+            runOnUiThread(() -> {
+                refreshDriverName();
+                android.widget.Toast.makeText(this, shown, android.widget.Toast.LENGTH_LONG).show();
+            });
+        }, "DriverImport").start();
     }
 
     // The frame rate: 30, 60 and the screen's faster rates, up to its maximum.

@@ -33,6 +33,12 @@ public class GameActivity extends SDLActivity {
     protected void onCreate(Bundle savedInstanceState) {
         // The log players can send (GameLog), before the game's library starts writing to it.
         GameLog.begin(this);
+        // The Vulkan driver chosen in the settings (GpuDrivers), opened by the game's library.
+        try {
+            GpuDrivers.exportForGame(this);
+        } catch (Exception e) {
+            // The system's driver then.
+        }
         // The Balanced preset's resolution (SettingsActivity.resolutionScale), read by the renderer.
         try {
             android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();

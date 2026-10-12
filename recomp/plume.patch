@@ -40,18 +40,27 @@ index 9dcfedf..1bbde84 100644
          // Samplers.
          bool samplerMirrorClampToEdge = false;
 diff --git a/plume_vulkan.cpp b/plume_vulkan.cpp
-index f1dd503..03e7954 100644
+index f1dd503..8437878 100644
 --- a/plume_vulkan.cpp
 +++ b/plume_vulkan.cpp
-@@ -13,6 +13,7 @@
+@@ -13,8 +13,16 @@
  #include <algorithm>
  #include <cmath>
  #include <climits>
 +#include <stdexcept>
  #include <unordered_map>
  
++#ifdef __ANDROID__
++#   include <dlfcn.h>
++// The app's custom driver loader (Conker's host/src/android/gpu_driver.cpp); absent in builds
++// without it, where the system's driver is used.
++extern "C" __attribute__((weak)) void *conker_android_open_vulkan();
++#endif
++
  #if DLSS_ENABLED
-@@ -991,6 +992,20 @@ namespace plume {
+ #   include "render/plume_dlss.h"
+ #endif
+@@ -991,6 +999,20 @@ namespace plume {
  
          if (desc.multisampling.sampleLocationsEnabled && (desc.flags & RenderTextureFlag::DEPTH_TARGET)) {
              imageInfo.flags |= VK_IMAGE_CREATE_SAMPLE_LOCATIONS_COMPATIBLE_DEPTH_BIT_EXT;
@@ -72,7 +81,7 @@ index f1dd503..03e7954 100644
          }
  
          if (desc.flags & RenderTextureFlag::CUBE) {
-@@ -1171,6 +1186,11 @@ namespace plume {
+@@ -1171,6 +1193,11 @@ namespace plume {
              VkDescriptorSetLayoutBinding dstBinding = {};
              dstBinding.binding = srcRange.binding;
              dstBinding.descriptorCount = srcRange.count;
@@ -84,7 +93,7 @@ index f1dd503..03e7954 100644
              dstBinding.stageFlags = VK_SHADER_STAGE_ALL;
              dstBinding.descriptorType = toVk(srcRange.type);
              if (srcRange.immutableSampler != nullptr) {
-@@ -1195,7 +1215,9 @@ namespace plume {
+@@ -1195,7 +1222,9 @@ namespace plume {
          
          thread_local std::vector<VkDescriptorBindingFlags> bindingFlags;
          VkDescriptorSetLayoutBindingFlagsCreateInfo flagsInfo = {};
@@ -95,7 +104,7 @@ index f1dd503..03e7954 100644
              bindingFlags.clear();
              bindingFlags.resize(descriptorSetDesc.descriptorRangesCount, 0);
              bindingFlags[descriptorSetDesc.descriptorRangesCount - 1] = VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_VARIABLE_DESCRIPTOR_COUNT_BIT;
-@@ -1282,6 +1304,110 @@ namespace plume {
+@@ -1282,6 +1311,110 @@ namespace plume {
  
      // VulkanShader
  
@@ -206,7 +215,7 @@ index f1dd503..03e7954 100644
      VulkanShader::VulkanShader(VulkanDevice *device, const void *data, uint64_t size, const char *entryPointName, RenderShaderFormat format) {
          assert(device != nullptr);
          assert(data != nullptr);
-@@ -1297,6 +1423,15 @@ namespace plume {
+@@ -1297,6 +1430,15 @@ namespace plume {
          shaderInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
          shaderInfo.pCode = reinterpret_cast<const uint32_t *>(data);
          shaderInfo.codeSize = size;
@@ -222,7 +231,7 @@ index f1dd503..03e7954 100644
          VkResult res = vkCreateShaderModule(device->vk, &shaderInfo, nullptr, &vk);
          if (res != VK_SUCCESS) {
              fprintf(stderr, "vkCreateShaderModule failed with error code 0x%X.\n", res);
-@@ -1364,6 +1499,19 @@ namespace plume {
+@@ -1364,6 +1506,19 @@ namespace plume {
  
      VulkanPipeline::~VulkanPipeline() { }
  
@@ -242,7 +251,7 @@ index f1dd503..03e7954 100644
      // VulkanComputePipeline
  
      VulkanComputePipeline::VulkanComputePipeline(VulkanDevice *device, const RenderComputePipelineDesc &desc) : VulkanPipeline(device, Type::Compute) {
-@@ -1371,6 +1519,12 @@ namespace plume {
+@@ -1371,6 +1526,12 @@ namespace plume {
          assert(desc.pipelineLayout != nullptr);
          assert((desc.threadGroupSizeX > 0) && (desc.threadGroupSizeY > 0) && (desc.threadGroupSizeZ > 0));
  
@@ -255,7 +264,7 @@ index f1dd503..03e7954 100644
          std::vector<VkSpecializationMapEntry> specEntries(desc.specConstantsCount);
          std::vector<uint32_t> specData(desc.specConstantsCount);
          VkSpecializationInfo specInfo = {};
-@@ -1392,7 +1546,8 @@ namespace plume {
+@@ -1392,7 +1553,8 @@ namespace plume {
  
          VkResult res = vkCreateComputePipelines(device->vk, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &vk);
          if (res != VK_SUCCESS) {
@@ -265,7 +274,7 @@ index f1dd503..03e7954 100644
              return;
          }
      }
-@@ -1417,6 +1572,17 @@ namespace plume {
+@@ -1417,6 +1579,17 @@ namespace plume {
      VulkanGraphicsPipeline::VulkanGraphicsPipeline(VulkanDevice *device, const RenderGraphicsPipelineDesc &desc) : VulkanPipeline(device, Type::Graphics) {
          assert(desc.pipelineLayout != nullptr);
  
@@ -283,7 +292,7 @@ index f1dd503..03e7954 100644
          thread_local std::vector<VkPipelineShaderStageCreateInfo> stages;
          stages.clear();
  
-@@ -1855,7 +2021,7 @@ namespace plume {
+@@ -1855,7 +2028,7 @@ namespace plume {
  
          this->descriptorSetCount = uint32_t(pipelineLayout->descriptorSetLayouts.size());
  
@@ -292,7 +301,7 @@ index f1dd503..03e7954 100644
          if (res != VK_SUCCESS) {
              fprintf(stderr, "vkCreateRayTracingPipelinesKHR failed with error code 0x%X.\n", res);
              return;
-@@ -1899,7 +2065,16 @@ namespace plume {
+@@ -1899,7 +2072,16 @@ namespace plume {
              boundlessRangeSize = std::max(desc.boundlessRangeSize, 1U);
  
              const RenderDescriptorRange &lastDescriptorRange = desc.descriptorRanges[desc.descriptorRangesCount - 1];
@@ -310,7 +319,7 @@ index f1dd503..03e7954 100644
              rangeCount--;
          }
  
-@@ -1910,7 +2085,8 @@ namespace plume {
+@@ -1910,7 +2092,8 @@ namespace plume {
  
          setLayout = new VulkanDescriptorSetLayout(device, desc);
  
@@ -320,7 +329,7 @@ index f1dd503..03e7954 100644
          if (descriptorPool == VK_NULL_HANDLE) {
              return;
          }
-@@ -1922,7 +2098,7 @@ namespace plume {
+@@ -1922,7 +2105,7 @@ namespace plume {
          allocateInfo.descriptorSetCount = 1;
  
          VkDescriptorSetVariableDescriptorCountAllocateInfo countInfo = {};
@@ -329,7 +338,7 @@ index f1dd503..03e7954 100644
              countInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_VARIABLE_DESCRIPTOR_COUNT_ALLOCATE_INFO;
              countInfo.pDescriptorCounts = &boundlessRangeSize;
              countInfo.descriptorSetCount = 1;
-@@ -1934,6 +2110,8 @@ namespace plume {
+@@ -1934,6 +2117,8 @@ namespace plume {
              fprintf(stderr, "vkAllocateDescriptorSets failed with error code 0x%X.\n", res);
              return;
          }
@@ -338,7 +347,7 @@ index f1dd503..03e7954 100644
      }
  
      VulkanDescriptorSet::~VulkanDescriptorSet() {
-@@ -2020,10 +2198,21 @@ namespace plume {
+@@ -2020,10 +2205,21 @@ namespace plume {
  
      void VulkanDescriptorSet::setDescriptor(uint32_t descriptorIndex, const VkDescriptorBufferInfo *bufferInfo, const VkDescriptorImageInfo *imageInfo, const VkBufferView *texelBufferView, void *pNext) {
          assert(descriptorIndex < setLayout->descriptorBindingIndices.size());
@@ -360,7 +369,7 @@ index f1dd503..03e7954 100644
          VkWriteDescriptorSet writeDescriptor = {};
          writeDescriptor.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
          writeDescriptor.pNext = pNext;
-@@ -2073,6 +2262,35 @@ namespace plume {
+@@ -2073,6 +2269,35 @@ namespace plume {
  
      // VulkanSwapChain
  
@@ -396,7 +405,7 @@ index f1dd503..03e7954 100644
      VulkanSwapChain::VulkanSwapChain(VulkanCommandQueue *commandQueue, const RenderSwapChainDesc &desc) {
          assert(commandQueue != nullptr);
          assert(desc.textureCount > 0);
-@@ -2114,6 +2332,10 @@ namespace plume {
+@@ -2114,6 +2339,10 @@ namespace plume {
              fprintf(stderr, "vkCreateAndroidSurfaceKHR failed with error code 0x%X.\n", res);
              return;
          }
@@ -407,7 +416,7 @@ index f1dd503..03e7954 100644
  #   elif defined(__linux__)
          assert(desc.renderWindow.display != 0);
          assert(desc.renderWindow.window != 0);
-@@ -2247,6 +2469,9 @@ namespace plume {
+@@ -2247,6 +2476,9 @@ namespace plume {
          if (surface != VK_NULL_HANDLE) {
              VulkanInterface *renderInterface = commandQueue->device->renderInterface;
              vkDestroySurfaceKHR(renderInterface->instance, surface, nullptr);
@@ -417,7 +426,7 @@ index f1dd503..03e7954 100644
          }
  
          // Remove tracking from the parent command queue.
-@@ -2310,6 +2535,12 @@ namespace plume {
+@@ -2310,6 +2542,12 @@ namespace plume {
      }
  
      bool VulkanSwapChain::resize() {
@@ -430,7 +439,7 @@ index f1dd503..03e7954 100644
          getWindowSize(width, height);
  
          // Don't recreate the swap chain at all if the window doesn't have a valid size.
-@@ -2401,6 +2632,11 @@ namespace plume {
+@@ -2401,6 +2639,11 @@ namespace plume {
      }
  
      bool VulkanSwapChain::needsResize() const {
@@ -442,7 +451,7 @@ index f1dd503..03e7954 100644
          uint32_t windowWidth, windowHeight;
          getWindowSize(windowWidth, windowHeight);
          return (vk == VK_NULL_HANDLE) || (windowWidth != width) || (windowHeight != height) || (requiredPresentMode != createdPresentMode);
-@@ -2501,6 +2737,56 @@ namespace plume {
+@@ -2501,6 +2744,56 @@ namespace plume {
          }
      }
  
@@ -499,7 +508,7 @@ index f1dd503..03e7954 100644
      void VulkanSwapChain::releaseImageViews() {
          for (VulkanTexture &texture : textures) {
              if (texture.imageView != VK_NULL_HANDLE) {
-@@ -2596,7 +2882,13 @@ namespace plume {
+@@ -2596,7 +2889,13 @@ namespace plume {
  
              // Upgrade the operations to NONE if supported. Fixes the following validation issue: https://github.com/KhronosGroup/Vulkan-ValidationLayers/issues/2349
              // We prefer to just ignore this potential hazard on older Vulkan versions as it just seems to be an edge case for some hardware.
@@ -513,7 +522,7 @@ index f1dd503..03e7954 100644
              VkAttachmentDescription attachment = {};
              attachment.format = toVk(depthAttachmentViewDesc.format);
              attachment.samples = VkSampleCountFlagBits(depthAttachment->desc.multisampling.sampleCount);
-@@ -2706,7 +2998,13 @@ namespace plume {
+@@ -2706,7 +3005,13 @@ namespace plume {
      void VulkanQueryPool::queryResults() {
  	    VkResult res = vkGetQueryPoolResults(device->vk, vk, 0, uint32_t(results.size()), sizeof(uint64_t) * results.size(), results.data(), sizeof(uint64_t), VK_QUERY_RESULT_64_BIT);
          if (res != VK_SUCCESS) {
@@ -528,7 +537,7 @@ index f1dd503..03e7954 100644
              return;
          }
  
-@@ -2869,6 +3167,10 @@ namespace plume {
+@@ -2869,6 +3174,10 @@ namespace plume {
              imageMemoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
              imageMemoryBarrier.oldLayout = toImageLayout(interfaceTexture->textureLayout);
              imageMemoryBarrier.newLayout = toImageLayout(textureBarrier.layout);
@@ -539,7 +548,7 @@ index f1dd503..03e7954 100644
              imageMemoryBarrier.subresourceRange.levelCount = interfaceTexture->desc.mipLevels;
              imageMemoryBarrier.subresourceRange.layerCount = interfaceTexture->desc.arraySize;
              imageMemoryBarrier.subresourceRange.aspectMask = toAspectFlags(interfaceTexture->desc.format, interfaceTexture->desc.flags);
-@@ -2940,7 +3242,10 @@ namespace plume {
+@@ -2940,7 +3249,10 @@ namespace plume {
      }
  
      void VulkanCommandList::setPipeline(const RenderPipeline *pipeline) {
@@ -551,7 +560,7 @@ index f1dd503..03e7954 100644
  
          const VulkanPipeline *interfacePipeline = static_cast<const VulkanPipeline *>(pipeline);
          switch (interfacePipeline->type) {
-@@ -3470,12 +3775,28 @@ namespace plume {
+@@ -3470,12 +3782,28 @@ namespace plume {
          assert(targetFramebuffer != nullptr);
          
          if (activeRenderPass == VK_NULL_HANDLE) {
@@ -580,7 +589,7 @@ index f1dd503..03e7954 100644
              vkCmdBeginRenderPass(vk, &beginInfo, VkSubpassContents::VK_SUBPASS_CONTENTS_INLINE);
              activeRenderPass = targetFramebuffer->renderPass;
          }
-@@ -3626,17 +3947,27 @@ namespace plume {
+@@ -3626,17 +3954,27 @@ namespace plume {
          }
  
          if (res != VK_SUCCESS) {
@@ -609,7 +618,7 @@ index f1dd503..03e7954 100644
              fprintf(stderr, "vkWaitForFences failed with error code 0x%X.\n", res);
              return;
          }
-@@ -3832,14 +4163,18 @@ namespace plume {
+@@ -3832,14 +4170,18 @@ namespace plume {
          // Check for supported features.
          void *featuresChain = nullptr;
          VkPhysicalDeviceDescriptorIndexingFeatures indexingFeatures = {};
@@ -630,7 +639,7 @@ index f1dd503..03e7954 100644
          if (scalarBlockLayoutFound) {
              layoutFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES;
              layoutFeatures.pNext = featuresChain;
-@@ -3932,7 +4267,49 @@ namespace plume {
+@@ -3932,7 +4274,49 @@ namespace plume {
              createDeviceChain = &accelerationStructureFeatures;
          }
  
@@ -681,7 +690,7 @@ index f1dd503..03e7954 100644
          if (descriptorIndexingSupported) {
              indexingFeatures.pNext = createDeviceChain;
              createDeviceChain = &indexingFeatures;
-@@ -4049,7 +4426,53 @@ namespace plume {
+@@ -4049,7 +4433,53 @@ namespace plume {
          createInfo.enabledExtensionCount = uint32_t(enabledExtensions.size());
          createInfo.pEnabledFeatures = &deviceFeatures.features;
  
@@ -735,7 +744,7 @@ index f1dd503..03e7954 100644
          if (res != VK_SUCCESS) {
              fprintf(stderr, "vkCreateDevice failed with error code 0x%X.\n", res);
              return;
-@@ -4088,7 +4511,7 @@ namespace plume {
+@@ -4088,7 +4518,7 @@ namespace plume {
          allocatorInfo.device = vk;
          allocatorInfo.pVulkanFunctions = &vmaFunctions;
          allocatorInfo.instance = renderInterface->instance;
@@ -744,7 +753,7 @@ index f1dd503..03e7954 100644
  
          res = vmaCreateAllocator(&allocatorInfo, &allocator);
          if (res != VK_SUCCESS) {
-@@ -4120,20 +4543,58 @@ namespace plume {
+@@ -4120,20 +4550,58 @@ namespace plume {
          description.dedicatedVideoMemory = memoryHeapSize;
  
          // Fill capabilities.
@@ -804,6 +813,57 @@ index f1dd503..03e7954 100644
          capabilities.dynamicDepthBias = true;
          capabilities.queryPools = true;
          capabilities.uma = (description.type == RenderDeviceType::INTEGRATED) && hasHostVisibleDeviceLocalMemory;
+@@ -4464,7 +4932,49 @@ namespace plume {
+ #else
+     VulkanInterface::VulkanInterface() {
+ #endif
+-        VkResult res = volkInitialize();
++        VkResult res = VK_ERROR_INITIALIZATION_FAILED;
++#   ifdef __ANDROID__
++        // A custom driver the player chose (Turnip and the like), opened through libadrenotools
++        // by the app (host/src/android/gpu_driver.cpp); the system's otherwise.
++        void *customVulkan = (conker_android_open_vulkan != nullptr) ? conker_android_open_vulkan() : nullptr;
++        auto customGetInstanceProcAddr = (customVulkan != nullptr) ? reinterpret_cast<PFN_vkGetInstanceProcAddr>(dlsym(customVulkan, "vkGetInstanceProcAddr")) : nullptr;
++        if (customGetInstanceProcAddr != nullptr) {
++            volkInitializeCustom(customGetInstanceProcAddr);
++            res = VK_SUCCESS;
++
++            // A driver for another GPU (Turnip for an Adreno it doesn't know) finds none: the
++            // system's then, so the game still starts.
++            VkApplicationInfo probeAppInfo = {};
++            probeAppInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
++            probeAppInfo.apiVersion = VK_API_VERSION_1_1;
++            VkInstanceCreateInfo probeInfo = {};
++            probeInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
++            probeInfo.pApplicationInfo = &probeAppInfo;
++            VkInstance probeInstance = VK_NULL_HANDLE;
++            uint32_t probeDeviceCount = 0;
++            if (vkCreateInstance(&probeInfo, nullptr, &probeInstance) == VK_SUCCESS) {
++                auto enumerateDevices = reinterpret_cast<PFN_vkEnumeratePhysicalDevices>(customGetInstanceProcAddr(probeInstance, "vkEnumeratePhysicalDevices"));
++                auto destroyInstance = reinterpret_cast<PFN_vkDestroyInstance>(customGetInstanceProcAddr(probeInstance, "vkDestroyInstance"));
++                if (enumerateDevices != nullptr) {
++                    enumerateDevices(probeInstance, &probeDeviceCount, nullptr);
++                }
++
++                if (destroyInstance != nullptr) {
++                    destroyInstance(probeInstance, nullptr);
++                }
++            }
++
++            if (probeDeviceCount == 0) {
++                fprintf(stderr, "GPU driver: the custom driver found no GPU it supports; using the system's driver.\n");
++                res = volkInitialize();
++            }
++        }
++        else
++#   endif
++        {
++            res = volkInitialize();
++        }
++
+         if (res != VK_SUCCESS) {
+             fprintf(stderr, "volkInitialize failed with error code 0x%X.\n", res);
+             return;
 diff --git a/plume_vulkan.h b/plume_vulkan.h
 index 0a1edbe..0700e68 100644
 --- a/plume_vulkan.h

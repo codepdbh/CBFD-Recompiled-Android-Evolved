@@ -84,6 +84,25 @@ if (ANDROID)
     # src/android_main.cpp, which also sends the output to logcat.
     add_library(ConkerRecomp SHARED src/android_main.cpp)
     target_link_libraries(ConkerRecomp PRIVATE log android)
+
+    # Custom Vulkan drivers (Turnip and the like) through libadrenotools, 64-bit only: as in
+    # codepdbh/nfsmw-android. Its hooks are loaded from the app's native library folder.
+    if (ANDROID_ABI STREQUAL "arm64-v8a")
+        add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../tools/libadrenotools" libadrenotools)
+        add_library(conker_gpu_driver SHARED src/android/gpu_driver.cpp)
+        target_link_libraries(conker_gpu_driver PRIVATE adrenotools android log dl)
+        set_target_properties(conker_gpu_driver PROPERTIES CXX_VISIBILITY_PRESET hidden)
+        # linkernsbypass has data symbols named like libdl's functions: exporting them would
+        # interpose them when Android's loader opens its vendor namespace (SIGSEGV).
+        target_link_options(conker_gpu_driver PRIVATE "-Wl,--exclude-libs,ALL")
+        target_link_options(hook_impl PRIVATE "-Wl,--exclude-libs,ALL")
+        foreach(driver_target conker_gpu_driver main_hook file_redirect_hook gsl_alloc_hook hook_impl)
+            target_link_options(${driver_target} PRIVATE "-Wl,-z,max-page-size=16384")
+        endforeach()
+        target_link_libraries(ConkerRecomp PRIVATE conker_gpu_driver)
+        add_dependencies(ConkerRecomp main_hook file_redirect_hook gsl_alloc_hook hook_impl)
+        target_compile_definitions(ConkerRecomp PRIVATE CONKER_GPU_DRIVERS)
+    endif()
 else()
     add_executable(ConkerRecomp)
 endif()
