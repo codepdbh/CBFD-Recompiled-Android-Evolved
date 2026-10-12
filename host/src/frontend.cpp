@@ -52,6 +52,7 @@ SDL_Window* window = nullptr;
 void conker_mouse_camera_init();
 #if defined(__ANDROID__)
 void conker_android_attach_touch_controller(); // android/touch_controls.cpp
+extern "C" void *conker_android_open_vulkan(); // android/gpu_driver.cpp
 void conker_android_apply_pending_options();
 #endif
 
@@ -112,6 +113,10 @@ namespace {
     }
 
     ultramodern::renderer::WindowHandle create_window(void*) {
+#if defined(CONKER_GPU_DRIVERS)
+        // A custom Vulkan driver (android/gpu_driver.cpp) is opened before SDL loads the system's.
+        conker_android_open_vulkan();
+#endif
         uint32_t flags = SDL_WINDOW_RESIZABLE;
 #if defined(RT64_SDL_WINDOW_VULKAN) || defined(__ANDROID__)
         // On Android, without it SDL makes an EGL surface on the window, and Vulkan then

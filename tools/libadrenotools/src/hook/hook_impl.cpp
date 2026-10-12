@@ -67,13 +67,17 @@ __attribute__((visibility("default"))) void *hook_android_dlopen_ext(const char 
     // Preload ourself, a new instance will be created since we have different linker ancestory
     // If we don't preload we get a weird issue where despite being in NEEDED of the hook lib the hook's symbols will overwrite ours and cause an infinite loop
     auto hookImpl{linkernsbypass_namespace_dlopen("libhook_impl.so", RTLD_NOW, driverNs)};
-    if (!hookImpl)
+    if (!hookImpl) {
+        LOGI("hook_android_dlopen_ext: hook failed: couldn't load libhook_impl.so in the driver namespace: %s", dlerror());
         return nullptr;
+    }
 
     // Pass parameters to ourself
     auto initHookParam{reinterpret_cast<void (*)(const void *)>(dlsym(hookImpl, "init_hook_param"))};
-    if (!initHookParam)
+    if (!initHookParam) {
+        LOGI("hook_android_dlopen_ext: hook failed: no init_hook_param: %s", dlerror());
         return nullptr;
+    }
 
     initHookParam(hook_params);
 

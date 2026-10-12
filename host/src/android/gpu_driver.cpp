@@ -9,7 +9,7 @@
 #include <cstdlib>
 #include <string>
 
-extern "C" __attribute__((visibility("default"))) void *conker_android_open_vulkan() {
+static void *open_vulkan() {
     const char *directory = getenv("CONKER_GPU_DRIVER_DIR");
     const char *library = getenv("CONKER_GPU_DRIVER_NAME");
     if ((library == nullptr) || (*library == '\0')) {
@@ -33,5 +33,12 @@ extern "C" __attribute__((visibility("default"))) void *conker_android_open_vulk
     fprintf(stderr, "GPU driver %s: %s.\n", library, (handle != nullptr) ? "loaded" : "couldn't be loaded, using the system's driver");
     __android_log_print((handle != nullptr) ? ANDROID_LOG_INFO : ANDROID_LOG_ERROR, "ConkerRecomp", "Custom Vulkan driver %s%s: %s",
         path.c_str(), library, (handle != nullptr) ? "loaded" : "failed");
+    return handle;
+}
+
+// Opened once, before SDL loads the system's Vulkan for its window (create_window), and kept: plume
+// asks again when it starts.
+extern "C" __attribute__((visibility("default"))) void *conker_android_open_vulkan() {
+    static void *handle = open_vulkan();
     return handle;
 }

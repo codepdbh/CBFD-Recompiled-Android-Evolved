@@ -162,6 +162,23 @@ public class MainActivity extends Activity {
             romStatus.setText("No se pudo preparar " + gameFolder() + ": " + e.getMessage());
         }
         updateRomStatus();
+        offerSystemDriverAfterFailure();
+    }
+
+    /** If the last game failed with a custom GPU driver, offer the system's back (once per game). */
+    private void offerSystemDriverAfterFailure() {
+        GpuDrivers.Driver driver = GpuDrivers.selected(this);
+        String log = driver != null ? GameLog.read(8 << 20) : null;
+        if (log == null || !GpuDrivers.failedWith(this, driver, log)) {
+            return;
+        }
+        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("El driver de GPU falló")
+            .setMessage("La última partida con el driver " + driver.name + " no funcionó bien (la GPU dejó de "
+                + "responder o no pudo mostrar la imagen). ¿Volver al driver del sistema?")
+            .setPositiveButton("Usar el del sistema", (d, w) -> GpuDrivers.select(this, ""))
+            .setNegativeButton("Mantenerlo", null)
+            .show();
     }
 
     @Override

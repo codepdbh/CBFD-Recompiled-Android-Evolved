@@ -265,9 +265,10 @@ public class SettingsActivity extends Activity {
             driverName = text("", 16, Color.WHITE, false);
             refreshDriverName();
             card.addView(driverName);
-            card.addView(text("Un driver como Turnip (en formato adrenotools, un ZIP con meta.json) puede dar más "
-                + "rendimiento o arreglar errores gráficos en Adreno. Si el juego falla con él, vuelve al del sistema.",
-                13, 0xFFB8A898, false));
+            card.addView(text("Un driver alternativo (Turnip en Adreno, PanVK en algunos Mali) puede dar más rendimiento "
+                + "o arreglar errores gráficos. Si no reconoce tu GPU, el juego usa el del sistema; si falla de otra "
+                + "forma, vuelve al del sistema aquí.", 13, 0xFFB8A898, false));
+            card.addView(text(GpuDriverDownloads.advice(GpuInfo.renderer()), 13, ORANGE, false));
             Button change = new Button(this);
             change.setText("Cambiar driver");
             change.setAllCaps(false);
@@ -346,6 +347,7 @@ public class SettingsActivity extends Activity {
                 refreshDriverName();
                 dialog.dismiss();
             })
+            .setNegativeButton("Descargar de GitHub", (dialog, which) -> downloadFromGitHub())
             .setPositiveButton("Importar ZIP", (dialog, which) -> {
                 android.content.Intent picker = new android.content.Intent(android.content.Intent.ACTION_OPEN_DOCUMENT);
                 picker.addCategory(android.content.Intent.CATEGORY_OPENABLE);
@@ -364,6 +366,93 @@ public class SettingsActivity extends Activity {
             });
         }
         builder.show();
+    }
+
+    // Downloading a driver from a GitHub release (GpuDriverDownloads): a repository, then a ZIP.
+    private void downloadFromGitHub() {
+        java.util.List<GpuDriverDownloads.Source> sources = GpuDriverDownloads.sources(GpuInfo.renderer());
+        GpuDriverDownloads.Family family = GpuDriverDownloads.family(GpuInfo.renderer());
+        String[] names = new String[sources.size() + 1];
+        for (int i = 0; i < sources.size(); i++) {
+            GpuDriverDownloads.Source source = sources.get(i);
+            names[i] = source.description + (source.family == family ? "  ★ para tu GPU" : "") + "\n" + source.repository;
+        }
+        names[sources.size()] = "Otro repositorio de GitHub…";
+        new android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Descargar un driver")
+            .setItems(names, (dialog, which) -> {
+                if (which < sources.size()) {
+                    listReleases(sources.get(which).repository);
+                } else {
+                    android.widget.EditText input = new android.widget.EditText(this);
+                    input.setHint("usuario/repositorio");
+                    input.setSingleLine(true);
+                    new android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                        .setTitle("Repositorio de GitHub")
+                        .setMessage("Sus releases deben tener ZIPs en formato adrenotools (con meta.json).")
+                        .setView(input)
+                        .setPositiveButton("Buscar", (d, w) -> listReleases(input.getText().toString().trim()))
+                        .setNegativeButton("Cancelar", null)
+                        .show();
+                }
+            })
+            .setNegativeButton("Cancelar", null)
+            .show();
+    }
+
+    private void listReleases(String repository) {
+        driverName.setText("Buscando drivers en " + repository + "…");
+        new Thread(() -> {
+            try {
+                java.util.List<GpuDriverDownloads.Asset> assets = GpuDriverDownloads.assets(repository);
+                runOnUiThread(() -> {
+                    refreshDriverName();
+                    if (assets.isEmpty()) {
+                        android.widget.Toast.makeText(this, "Ese repositorio no tiene ZIPs en sus releases.", android.widget.Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    String[] names = new String[assets.size()];
+                    for (int i = 0; i < assets.size(); i++) {
+                        GpuDriverDownloads.Asset asset = assets.get(i);
+                        names[i] = asset.name + "\n" + asset.release + " · " + (asset.size / (1024 * 1024)) + " MB";
+                    }
+                    new android.app.AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                        .setTitle(repository)
+                        .setItems(names, (dialog, which) -> downloadDriver(assets.get(which)))
+                        .setNegativeButton("Cancelar", null)
+                        .show();
+                });
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    refreshDriverName();
+                    android.widget.Toast.makeText(this, "No se pudo consultar GitHub: " + e.getMessage(), android.widget.Toast.LENGTH_LONG).show();
+                });
+            }
+        }, "DriverReleases").start();
+    }
+
+    private void downloadDriver(GpuDriverDownloads.Asset asset) {
+        driverName.setText("Descargando " + asset.name + "…");
+        new Thread(() -> {
+            String message;
+            try {
+                java.io.File zip = GpuDriverDownloads.download(this, asset);
+                try {
+                    GpuDrivers.Driver driver = GpuDrivers.importZip(this, android.net.Uri.fromFile(zip));
+                    GpuDrivers.select(this, driver.id);
+                    message = "Driver instalado y elegido: " + driver.name + ". Si el juego falla, vuelve al del sistema.";
+                } finally {
+                    zip.delete();
+                }
+            } catch (Exception e) {
+                message = "No se pudo instalar: " + e.getMessage();
+            }
+            String shown = message;
+            runOnUiThread(() -> {
+                refreshDriverName();
+                android.widget.Toast.makeText(this, shown, android.widget.Toast.LENGTH_LONG).show();
+            });
+        }, "DriverDownload").start();
     }
 
     @Override

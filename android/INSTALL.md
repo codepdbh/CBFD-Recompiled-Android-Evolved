@@ -119,12 +119,21 @@ memoria para texturas que un PC. Usa `--max-size 0` para dejarlas intactas.
 
 ## Drivers de GPU (opcional, solo 64 bits)
 
-En **Ajustes → Driver de GPU → Cambiar driver → Importar ZIP** puedes usar un driver
-Vulkan alternativo, como Turnip para Adreno (ZIP en formato adrenotools, con `meta.json`;
-por ejemplo, los de [K11MCH1/AdrenoToolsDrivers](https://github.com/K11MCH1/AdrenoToolsDrivers/releases)).
-Puede dar más rendimiento o arreglar errores gráficos. Si el driver no reconoce tu GPU,
-el juego usa automáticamente el del sistema; si falla de otra forma, vuelve a
-**Driver del sistema** en el mismo menú.
+En **Ajustes → Driver de GPU → Cambiar driver** puedes usar un driver Vulkan alternativo.
+La app te dice qué tipo conviene para tu GPU:
+
+- **Adreno (Snapdragon):** Turnip (Mesa), el más maduro.
+- **Mali (MediaTek, algunos Exynos y Unisoc):** PanVK experimental, solo para algunos modelos (G52, G57, G720).
+- **Xclipse (Exynos 2200 o posterior) y PowerVR:** no hay drivers alternativos conocidos.
+
+Dos formas de instalarlo:
+
+- **Descargar de GitHub:** elige un repositorio de la lista (los recomendados para tu GPU van
+  primero) o escribe otro (`usuario/repositorio`), y luego el ZIP de una de sus versiones.
+- **Importar ZIP:** un archivo que ya tengas, en formato adrenotools (con `meta.json`).
+
+Si el driver no reconoce tu GPU, el juego usa automáticamente el del sistema. Si una partida
+con el driver falla, la pantalla de inicio te ofrece volver al **Driver del sistema**.
 
 ## Controles
 

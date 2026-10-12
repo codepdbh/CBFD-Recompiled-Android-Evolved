@@ -5,6 +5,8 @@
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
     <!-- Controller rumble. -->
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- Downloading GPU drivers from GitHub releases (Settings). -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <!-- RT64 renders with Vulkan 1.1 or later. -->
     <uses-feature android:name="android.hardware.vulkan.version" android:version="0x401000" android:required="true" />
@@ -16,7 +18,7 @@
         android:label="Conker Recompiled"
         android:icon="@mipmap/ic_launcher"
         android:roundIcon="@mipmap/ic_launcher"
-        android:extractNativeLibs="false"
+        android:extractNativeLibs="true"
         android:appCategory="game"
         android:isGame="true"
         android:hardwareAccelerated="true">

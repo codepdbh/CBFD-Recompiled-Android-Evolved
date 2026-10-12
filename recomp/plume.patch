@@ -40,7 +40,7 @@ index 9dcfedf..1bbde84 100644
          // Samplers.
          bool samplerMirrorClampToEdge = false;
 diff --git a/plume_vulkan.cpp b/plume_vulkan.cpp
-index f1dd503..8437878 100644
+index f1dd503..adee393 100644
 --- a/plume_vulkan.cpp
 +++ b/plume_vulkan.cpp
 @@ -13,8 +13,16 @@
@@ -439,7 +439,21 @@ index f1dd503..8437878 100644
          getWindowSize(width, height);
  
          // Don't recreate the swap chain at all if the window doesn't have a valid size.
-@@ -2401,6 +2639,11 @@ namespace plume {
+@@ -2348,7 +2586,12 @@ namespace plume {
+ 
+         VkResult res = vkCreateSwapchainKHR(commandQueue->device->vk, &createInfo, nullptr, &vk);
+         if (res != VK_SUCCESS) {
+-            fprintf(stderr, "vkCreateSwapchainKHR failed with error code 0x%X.\n", res);
++            // A few times only: retried every frame, it would bury the log.
++            static int reports = 0;
++            if (reports < 3) {
++                fprintf(stderr, "vkCreateSwapchainKHR failed with error code 0x%X%s.\n", res, (++reports == 3) ? " (not repeated)" : "");
++            }
++
+             return false;
+         }
+ 
+@@ -2401,6 +2644,11 @@ namespace plume {
      }
  
      bool VulkanSwapChain::needsResize() const {
@@ -451,7 +465,7 @@ index f1dd503..8437878 100644
          uint32_t windowWidth, windowHeight;
          getWindowSize(windowWidth, windowHeight);
          return (vk == VK_NULL_HANDLE) || (windowWidth != width) || (windowHeight != height) || (requiredPresentMode != createdPresentMode);
-@@ -2501,6 +2744,56 @@ namespace plume {
+@@ -2501,6 +2749,56 @@ namespace plume {
          }
      }
  
@@ -508,7 +522,7 @@ index f1dd503..8437878 100644
      void VulkanSwapChain::releaseImageViews() {
          for (VulkanTexture &texture : textures) {
              if (texture.imageView != VK_NULL_HANDLE) {
-@@ -2596,7 +2889,13 @@ namespace plume {
+@@ -2596,7 +2894,13 @@ namespace plume {
  
              // Upgrade the operations to NONE if supported. Fixes the following validation issue: https://github.com/KhronosGroup/Vulkan-ValidationLayers/issues/2349
              // We prefer to just ignore this potential hazard on older Vulkan versions as it just seems to be an edge case for some hardware.
@@ -522,7 +536,7 @@ index f1dd503..8437878 100644
              VkAttachmentDescription attachment = {};
              attachment.format = toVk(depthAttachmentViewDesc.format);
              attachment.samples = VkSampleCountFlagBits(depthAttachment->desc.multisampling.sampleCount);
-@@ -2706,7 +3005,13 @@ namespace plume {
+@@ -2706,7 +3010,13 @@ namespace plume {
      void VulkanQueryPool::queryResults() {
  	    VkResult res = vkGetQueryPoolResults(device->vk, vk, 0, uint32_t(results.size()), sizeof(uint64_t) * results.size(), results.data(), sizeof(uint64_t), VK_QUERY_RESULT_64_BIT);
          if (res != VK_SUCCESS) {
@@ -537,7 +551,7 @@ index f1dd503..8437878 100644
              return;
          }
  
-@@ -2869,6 +3174,10 @@ namespace plume {
+@@ -2869,6 +3179,10 @@ namespace plume {
              imageMemoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
              imageMemoryBarrier.oldLayout = toImageLayout(interfaceTexture->textureLayout);
              imageMemoryBarrier.newLayout = toImageLayout(textureBarrier.layout);
@@ -548,7 +562,7 @@ index f1dd503..8437878 100644
              imageMemoryBarrier.subresourceRange.levelCount = interfaceTexture->desc.mipLevels;
              imageMemoryBarrier.subresourceRange.layerCount = interfaceTexture->desc.arraySize;
              imageMemoryBarrier.subresourceRange.aspectMask = toAspectFlags(interfaceTexture->desc.format, interfaceTexture->desc.flags);
-@@ -2940,7 +3249,10 @@ namespace plume {
+@@ -2940,7 +3254,10 @@ namespace plume {
      }
  
      void VulkanCommandList::setPipeline(const RenderPipeline *pipeline) {
@@ -560,7 +574,7 @@ index f1dd503..8437878 100644
  
          const VulkanPipeline *interfacePipeline = static_cast<const VulkanPipeline *>(pipeline);
          switch (interfacePipeline->type) {
-@@ -3470,12 +3782,28 @@ namespace plume {
+@@ -3470,12 +3787,28 @@ namespace plume {
          assert(targetFramebuffer != nullptr);
          
          if (activeRenderPass == VK_NULL_HANDLE) {
@@ -589,7 +603,7 @@ index f1dd503..8437878 100644
              vkCmdBeginRenderPass(vk, &beginInfo, VkSubpassContents::VK_SUBPASS_CONTENTS_INLINE);
              activeRenderPass = targetFramebuffer->renderPass;
          }
-@@ -3626,17 +3954,27 @@ namespace plume {
+@@ -3626,17 +3959,27 @@ namespace plume {
          }
  
          if (res != VK_SUCCESS) {
@@ -618,7 +632,7 @@ index f1dd503..8437878 100644
              fprintf(stderr, "vkWaitForFences failed with error code 0x%X.\n", res);
              return;
          }
-@@ -3832,14 +4170,18 @@ namespace plume {
+@@ -3832,14 +4175,18 @@ namespace plume {
          // Check for supported features.
          void *featuresChain = nullptr;
          VkPhysicalDeviceDescriptorIndexingFeatures indexingFeatures = {};
@@ -639,7 +653,7 @@ index f1dd503..8437878 100644
          if (scalarBlockLayoutFound) {
              layoutFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES;
              layoutFeatures.pNext = featuresChain;
-@@ -3932,7 +4274,49 @@ namespace plume {
+@@ -3932,7 +4279,49 @@ namespace plume {
              createDeviceChain = &accelerationStructureFeatures;
          }
  
@@ -690,7 +704,7 @@ index f1dd503..8437878 100644
          if (descriptorIndexingSupported) {
              indexingFeatures.pNext = createDeviceChain;
              createDeviceChain = &indexingFeatures;
-@@ -4049,7 +4433,53 @@ namespace plume {
+@@ -4049,7 +4438,53 @@ namespace plume {
          createInfo.enabledExtensionCount = uint32_t(enabledExtensions.size());
          createInfo.pEnabledFeatures = &deviceFeatures.features;
  
@@ -744,7 +758,7 @@ index f1dd503..8437878 100644
          if (res != VK_SUCCESS) {
              fprintf(stderr, "vkCreateDevice failed with error code 0x%X.\n", res);
              return;
-@@ -4088,7 +4518,7 @@ namespace plume {
+@@ -4088,7 +4523,7 @@ namespace plume {
          allocatorInfo.device = vk;
          allocatorInfo.pVulkanFunctions = &vmaFunctions;
          allocatorInfo.instance = renderInterface->instance;
@@ -753,7 +767,7 @@ index f1dd503..8437878 100644
  
          res = vmaCreateAllocator(&allocatorInfo, &allocator);
          if (res != VK_SUCCESS) {
-@@ -4120,20 +4550,58 @@ namespace plume {
+@@ -4120,20 +4555,58 @@ namespace plume {
          description.dedicatedVideoMemory = memoryHeapSize;
  
          // Fill capabilities.
@@ -813,7 +827,7 @@ index f1dd503..8437878 100644
          capabilities.dynamicDepthBias = true;
          capabilities.queryPools = true;
          capabilities.uma = (description.type == RenderDeviceType::INTEGRATED) && hasHostVisibleDeviceLocalMemory;
-@@ -4464,7 +4932,49 @@ namespace plume {
+@@ -4464,7 +4937,49 @@ namespace plume {
  #else
      VulkanInterface::VulkanInterface() {
  #endif

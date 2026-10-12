@@ -199,6 +199,24 @@ final class GpuDrivers {
         }
     }
 
+    /**
+     * Whether the game the log tells of ran with the driver and failed in the GPU (lost device, no
+     * image, crash). Answered once per game, so the question isn't repeated.
+     */
+    static boolean failedWith(Context context, Driver driver, String log) {
+        if (!log.contains("[android] Vulkan driver: " + driver.name + " (")) {
+            return false;
+        }
+        boolean failed = log.contains("The Vulkan device was lost") || log.contains("vkCreateSwapchainKHR failed")
+            || log.contains("Unable to find compatible graphics device") || log.contains("*** Crash");
+        String game = log.substring(0, Math.max(0, log.indexOf('\n')));
+        if (!failed || game.equals(prefs(context).getString("asked_for", ""))) {
+            return false;
+        }
+        prefs(context).edit().putString("asked_for", game).apply();
+        return true;
+    }
+
     /** For the game's process, before its library starts: which driver to open and where from. */
     static void exportForGame(Context context) throws Exception {
         Driver driver = supported() ? selected(context) : null;
