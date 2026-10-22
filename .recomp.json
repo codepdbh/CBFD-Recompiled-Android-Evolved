@@ -1,0 +1,32 @@
+{
+  "$schema": "https://recomp.fyi/schema/v1.json",
+  "game": "Conker's Bad Fur Day",
+  "system": "N64",
+  "type": "recomp",
+  "project": "Conker Recompiled Android Evolved",
+  "status": "released",
+  "targets": [
+    "Android"
+  ],
+  "approach": "Static MIPS recompilation with N64Recomp, N64ModernRuntime and RT64; Android adaptation of CBFD-Recompiled.",
+  "maintainers": [
+    {
+      "name": "codepdbh",
+      "link": "https://github.com/codepdbh"
+    }
+  ],
+  "notes": "Android fork of sciaschi/CBFD-Recompiled with public ARM64 and ARMv7 APKs, touch controls and mod support. Requires the supported US game data. The original PC recompilation and runtime are upstream work.",
+  "toolchain": [
+    "N64recomp",
+    "RT64"
+  ],
+  "links": [
+    {
+      "label": "Upstream project",
+      "url": "https://github.com/sciaschi/CBFD-Recompiled"
+    }
+  ],
+  "original": {
+    "region": "USA"
+  }
+}
