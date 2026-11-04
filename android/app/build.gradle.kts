@@ -11,8 +11,8 @@ android {
         applicationId = "com.codepdbh.cbfdrecomp"
         minSdk = 30
         targetSdk = 36
-        versionCode = 17
-        versionName = "0.2.15"
+        versionCode = 18
+        versionName = "0.2.16"
         externalNativeBuild {
             cmake {
                 // The recompiled game is far too slow unoptimised, even in debug builds.

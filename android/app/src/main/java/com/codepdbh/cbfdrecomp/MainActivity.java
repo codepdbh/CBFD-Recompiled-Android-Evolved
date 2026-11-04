@@ -82,8 +82,30 @@ public class MainActivity extends Activity {
             hint.setText("Versión de 32 bits (ALPHA): sin probar, puede ir lenta o cerrarse. "
                 + "Los mods no están disponibles. Si tu teléfono es de 64 bits, usa la versión arm64-v8a.");
             hint.setTextColor(0xFFF08A24);
+            offer64BitBuild();
         }
         restoreIfAsked(getIntent());
+    }
+
+    /** The 32-bit build on a phone that runs the 64-bit one, the build that's tested: once per version. */
+    private void offer64BitBuild() {
+        if (android.os.Build.SUPPORTED_64_BIT_ABIS.length == 0) {
+            return;
+        }
+        android.content.SharedPreferences prefs = getSharedPreferences("notices", MODE_PRIVATE);
+        String version = GameLog.version(this);
+        if (version.equals(prefs.getString("offered_64_bit", ""))) {
+            return;
+        }
+        prefs.edit().putString("offered_64_bit", version).apply();
+        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+            .setTitle("Tu teléfono es de 64 bits")
+            .setMessage("Instalaste la versión de 32 bits, una ALPHA que puede no abrir o cerrarse. Descarga la "
+                + "versión arm64-v8a: tiene mods y drivers de GPU, y se instala encima sin perder tus partidas.")
+            .setPositiveButton("Ir a las descargas", (d, w) -> startActivity(new Intent(Intent.ACTION_VIEW,
+                Uri.parse("https://github.com/codepdbh/CBFD-Recompiled-Android-Evolved/releases/latest"))))
+            .setNegativeButton("Ahora no", null)
+            .show();
     }
 
     @Override
@@ -672,16 +694,16 @@ public class MainActivity extends Activity {
         }
     }
 
-    /** A GitHub issue: the log is too long for the link, so it goes to the clipboard to paste. */
+    /** A GitHub issue that opens already holding the log's useful part; all of it is on the clipboard. */
     private void sendReportToGitHub(String log, String version) {
         android.content.ClipboardManager clipboard = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
         clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Informe", log));
-        String body = "**Qué pasó:**\n\n\n**Informe** (ya está copiado: mantén pulsado aquí y pega):\n\n```\n\n```\n";
+        String body = ReportText.issueBody(log);
         Uri uri = Uri.parse(REPORT_ISSUES).buildUpon()
             .appendQueryParameter("title", reportTitle(version))
             .appendQueryParameter("body", body)
             .build();
-        Toast.makeText(this, "Informe copiado: pégalo en el issue.", Toast.LENGTH_LONG).show();
+        Toast.makeText(this, "El informe ya va en el issue: cuenta qué pasó y envíalo.", Toast.LENGTH_LONG).show();
         startActivity(new Intent(Intent.ACTION_VIEW, uri));
     }
 
